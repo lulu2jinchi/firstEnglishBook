@@ -55,7 +55,7 @@ const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, t
 </script>
 
 <style scoped>
-:global(body) {
+:global(body.body--reader) {
   margin: 0;
   font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   background: #0f172a;
