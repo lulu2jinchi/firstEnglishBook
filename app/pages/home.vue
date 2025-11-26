@@ -6,7 +6,7 @@
     </label>
 
     <div class="grid">
-      <div v-for="book in filteredBooks" :key="book.title" class="card">
+      <div v-for="book in filteredBooks" :key="book.file" class="card" role="button" @click="goRead(book)">
         <div class="cover">
           <img :src="book.cover" :alt="book.title" loading="lazy" />
         </div>
@@ -24,13 +24,15 @@
       <button class="tab" type="button" aria-label="个人中心">
         <img :src="imgPerson" alt="个人中心" />
       </button>
+      <div class="home-indicator" aria-hidden="true" />
     </nav>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
-import { useHead } from "#imports";
+import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { useHead } from '#imports'
 
 const imgImage =
   "https://www.figma.com/api/mcp/asset/610d2caf-7fb4-4ff2-bd83-cedaa2aa4780";
@@ -59,32 +61,55 @@ const imgRightSide =
 const imgTime =
   "https://www.figma.com/api/mcp/asset/74f541a2-42b8-4a06-82da-9f562ec5b317";
 
-const searchQuery = ref("");
-const books = ref([
-  { title: "Herbal Market", cover: imgImage },
-  { title: "Green Stems", cover: imgImage2 },
-  { title: "Radish Days", cover: imgImage3 },
-  { title: "Leafy Garden", cover: imgImage4 },
-  { title: "Rooted Notes", cover: imgImage5 },
-  { title: "Fresh Bunch", cover: imgImage6 },
-  { title: "Spring Basket", cover: imgImage1 },
-  { title: "Kitchen Tales", cover: imgImage },
-]);
+type BookItem = {
+  file: string
+  title: string
+  cover: string
+}
+
+const router = useRouter()
+const searchQuery = ref('')
+
+const rawBooks = [
+  { file: 'book/Normal People (Sally Rooney) (Z-Library).epub', cover: imgImage },
+  { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub', cover: imgImage2 },
+  { file: 'book/oz.epub', cover: imgImage3 },
+  { file: 'book/rose.epub', cover: imgImage4 }
+]
+
+const books = computed<BookItem[]>(() =>
+  rawBooks.map((book, index) => {
+    const name = book.file.split('/').pop() || book.file
+    const title = name.replace(/\.epub$/i, '').trim()
+    // 为封面做简单轮换，避免全部相同
+    const covers = [imgImage, imgImage2, imgImage3, imgImage4, imgImage5, imgImage6, imgImage1]
+    return {
+      ...book,
+      title,
+      cover: covers[index % covers.length]
+    }
+  })
+)
 
 const filteredBooks = computed(() => {
+  const list = books.value
   if (!searchQuery.value.trim()) {
-    return books.value;
+    return list
   }
-  const query = searchQuery.value.toLowerCase();
-  return books.value.filter((book) => book.title.toLowerCase().includes(query));
-});
+  const query = searchQuery.value.toLowerCase()
+  return list.filter(book => book.title.toLowerCase().includes(query))
+})
+
+const goRead = (book: BookItem) => {
+  router.push({ path: '/', query: { book: book.file } })
+}
 
 useHead({
-  title: "Home · First English Book",
+  title: 'Home · First English Book',
   bodyAttrs: {
-    class: "body--home",
-  },
-});
+    class: 'body--home'
+  }
+})
 </script>
 
 <style scoped>
@@ -170,6 +195,7 @@ useHead({
   display: flex;
   flex-direction: column;
   gap: 8px;
+  cursor: pointer;
 }
 
 .cover {
@@ -202,7 +228,7 @@ useHead({
   right: 0;
   bottom: 0;
   height: 78px;
-  padding: 10px 24px calc(0px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 24px calc(16px + env(safe-area-inset-bottom, 0px));
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
   box-shadow: 0 -0.5px 0 rgba(0, 0, 0, 0.1);

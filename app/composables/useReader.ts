@@ -1,8 +1,8 @@
-import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
-export function useReader(viewerEl: Ref<HTMLElement | null>) {
+export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedRef<string>) {
   const isLoading = ref(true)
   const currentLocation = ref('—')
   const progressText = ref('0%')
@@ -10,16 +10,40 @@ export function useReader(viewerEl: Ref<HTMLElement | null>) {
   const isPaginated = computed(() => readingMode.value === 'paginated')
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
+  const encodedBookPath = computed(() => encodeURI(bookPath.value))
 
   let book: any
   let rendition: any
+  let ePubLib: any
 
-  const bookPath = encodeURI('/Normal People (Sally Rooney) (Z-Library).epub')
+  async function ensureLib() {
+    if (ePubLib) return ePubLib
+    const { default: ePub } = await import('epubjs')
+    ePubLib = ePub
+    return ePubLib
+  }
 
   onMounted(async () => {
-    const { default: ePub } = await import('epubjs')
+    await openBook()
+  })
 
-    book = ePub(bookPath)
+  onBeforeUnmount(() => {
+    rendition?.destroy?.()
+    book?.destroy?.()
+  })
+
+  watch(encodedBookPath, async () => {
+    isLoading.value = true
+    await openBook()
+    isLoading.value = false
+  })
+
+  async function openBook() {
+    const ePub = await ensureLib()
+    rendition?.destroy?.()
+    book?.destroy?.()
+
+    book = ePub(encodedBookPath.value)
     await book.ready
     await buildRendition(readingMode.value)
     await book.locations.generate(1600)
@@ -27,12 +51,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>) {
 
     updateProgress(rendition.currentLocation())
     isLoading.value = false
-  })
-
-  onBeforeUnmount(() => {
-    rendition?.destroy?.()
-    book?.destroy?.()
-  })
+  }
 
   const toggleMode = async () => {
     if (!rendition) return

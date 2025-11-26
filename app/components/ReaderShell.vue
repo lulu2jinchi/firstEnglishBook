@@ -45,13 +45,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { useReader } from '~/composables/useReader'
 
 const viewerEl = ref<HTMLDivElement | null>(null)
 
+const route = useRoute()
+
+const bookPath = computed(() => {
+  const queryPath = route.query.book
+  const raw = typeof queryPath === 'string' && queryPath.trim() ? queryPath : 'book/Normal People (Sally Rooney) (Z-Library).epub'
+  return raw.startsWith('/') ? raw : `/${raw}`
+})
+
 const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, toggleMode, goPrev, goNext } =
-  useReader(viewerEl)
+  useReader(viewerEl, bookPath)
 </script>
 
 <style scoped>
