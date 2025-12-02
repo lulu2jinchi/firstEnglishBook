@@ -1,10 +1,7 @@
 <template>
   <div class="reader-shell">
     <header class="reader-header">
-      <div class="title-block">
-        <p class="eyebrow">EPUB Reader</p>
-        <h1>Normal People (Sally Rooney)</h1>
-      </div>
+      <div class="title-block"></div>
       <div class="header-actions">
         <button class="mode-toggle" :disabled="isLoading" @click="toggleMode">
           {{ modeButtonText }}
@@ -45,28 +42,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute } from 'vue-router'
-import { useReader } from '~/composables/useReader'
+import { computed, ref } from "vue";
+import { useRoute } from "vue-router";
+import { useReader } from "~/composables/useReader";
 
-const viewerEl = ref<HTMLDivElement | null>(null)
+const viewerEl = ref<HTMLDivElement | null>(null);
 
-const route = useRoute()
+const route = useRoute();
 
 const bookPath = computed(() => {
-  const queryPath = route.query.book
-  const raw = typeof queryPath === 'string' && queryPath.trim() ? queryPath : 'book/Normal People (Sally Rooney) (Z-Library).epub'
-  return raw.startsWith('/') ? raw : `/${raw}`
-})
+  const queryPath = route.query.book;
+  const raw =
+    typeof queryPath === "string" && queryPath.trim()
+      ? queryPath
+      : "book/Normal People (Sally Rooney) (Z-Library).epub";
+  return raw.startsWith("/") ? raw : `/${raw}`;
+});
 
-const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, toggleMode, goPrev, goNext } =
-  useReader(viewerEl, bookPath)
+const {
+  isLoading,
+  currentLocation,
+  progressText,
+  isPaginated,
+  modeButtonText,
+  toggleMode,
+  goPrev,
+  goNext,
+} = useReader(viewerEl, bookPath);
 </script>
 
 <style scoped>
 :global(body.body--reader) {
   margin: 0;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
   background: #0f172a;
   color: #e2e8f0;
 }
@@ -99,7 +108,8 @@ const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, t
   color: #e2e8f0;
   font-weight: 700;
   cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .mode-toggle:hover:not(:disabled) {
@@ -139,7 +149,8 @@ const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, t
   border: 1px solid transparent;
   cursor: pointer;
   font-weight: 600;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease, border-color 0.2s ease;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease,
+    border-color 0.2s ease;
   color: #0f172a;
 }
 
@@ -185,8 +196,17 @@ const { isLoading, currentLocation, progressText, isPaginated, modeButtonText, t
   min-height: 70vh;
   display: flex;
   position: relative;
-  background: radial-gradient(circle at 20% 20%, rgba(255, 244, 189, 0.7), transparent 38%),
-    radial-gradient(circle at 80% 0%, rgba(255, 235, 148, 0.75), transparent 34%), #fff8dc;
+  background: radial-gradient(
+      circle at 20% 20%,
+      rgba(255, 244, 189, 0.7),
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at 80% 0%,
+      rgba(255, 235, 148, 0.75),
+      transparent 34%
+    ),
+    #fff8dc;
   border-radius: 16px;
   border: 1px solid rgba(203, 167, 71, 0.4);
   overflow: hidden;

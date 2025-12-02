@@ -101,7 +101,7 @@ const filteredBooks = computed(() => {
 })
 
 const goRead = (book: BookItem) => {
-  router.push({ path: '/', query: { book: book.file } })
+  router.push({ path: '/reader', query: { book: book.file } })
 }
 
 useHead({
