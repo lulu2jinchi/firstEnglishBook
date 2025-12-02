@@ -9,4 +9,5 @@ Always use Chinese to response.
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
 - app/components/ReaderShell.vue：页面 UI、样式与基础布局。
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件）。
+- server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
