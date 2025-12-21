@@ -18,15 +18,27 @@ type DefinitionRecord = {
   updatedAt: number
 }
 
+type LocationRecord = {
+  bookKey: string
+  cfi: string
+  updatedAt: number
+}
+
 class ReaderDefinitionDB extends Dexie {
   definitions!: Table<DefinitionRecord, string>
+  locations!: Table<LocationRecord, string>
 
   constructor() {
     super('reader-definition-cache')
     this.version(1).stores({
       definitions: 'key, bookKey, paragraphId, updatedAt'
     })
+    this.version(2).stores({
+      definitions: 'key, bookKey, paragraphId, updatedAt',
+      locations: 'bookKey, updatedAt'
+    })
     this.definitions = this.table('definitions')
+    this.locations = this.table('locations')
   }
 }
 
@@ -47,11 +59,40 @@ const buildBookKey = (path: string) => {
   return initials || 'book'
 }
 
+const loadSavedLocation = async (bookKey: string) => {
+  const db = ensureReaderDefinitionDb()
+  if (!db) return null
+  try {
+    const record = await db.locations.get(bookKey)
+    return record?.cfi || null
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('读取阅读位置失败', error)
+    return null
+  }
+}
+
+const saveReaderLocation = async (bookKey: string, cfi?: string | null) => {
+  if (!cfi) return
+  const db = ensureReaderDefinitionDb()
+  if (!db) return
+  try {
+    await db.locations.put({
+      bookKey,
+      cfi,
+      updatedAt: Date.now()
+    })
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('保存阅读位置失败', error)
+  }
+}
+
 export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedRef<string>) {
   const isLoading = ref(true)
   const currentLocation = ref('—')
   const progressText = ref('0%')
-  const readingMode = ref<ReadingMode>('paginated')
+  const readingMode = ref<ReadingMode>('scrolled-continuous')
   const isPaginated = computed(() => readingMode.value === 'paginated')
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
@@ -110,7 +151,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
 
     book = ePub(encodedBookPath.value)
     await book.ready
-    await buildRendition(readingMode.value)
+    const savedCfi = await loadSavedLocation(bookKey.value)
+    await buildRendition(readingMode.value, savedCfi)
     await book.locations.generate(1600)
     locationsReady.value = true
 
@@ -145,6 +187,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
       progressText.value = '0%'
       return
     }
+    console.log('当前阅读位置 CFI:', startCfi);
+    void saveReaderLocation(bookKey.value, startCfi)
 
     const percent = book.locations.percentageFromCfi(startCfi) || 0
     const locationIndex = book.locations.locationFromCfi(startCfi)
@@ -175,7 +219,18 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     attachContentHooks()
     setupParentMessageHandler()
     rendition.on('relocated', updateProgress)
-    await rendition.display(startCfi || undefined)
+    if (startCfi) {
+      try {
+        console.log('尝试恢复到保存的阅读位置 CFI:', startCfi);
+        await rendition.display(startCfi)
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('恢复阅读位置失败，使用默认位置', error)
+        await rendition.display()
+      }
+    } else {
+      await rendition.display()
+    }
   }
 
   function applyTheme() {
