@@ -1,5 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
@@ -374,6 +374,12 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     return tooltipEl
   }
 
+  const getTooltipBoundary = () => {
+    const topWindow = getTopWindow()
+    const topDoc = topWindow?.document || null
+    return topDoc?.querySelector<HTMLElement>('.reader-body') || null
+  }
+
   const hideTooltip = () => {
     if (!tooltipEl) return
     tooltipEl.dataset.show = 'false'
@@ -418,12 +424,30 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     tooltip.textContent = meaning
     tooltip.dataset.show = 'true'
 
+    const boundary = getTooltipBoundary()
     const virtualReference = buildVirtualReference(span, doc)
     const updatePosition = async () => {
+      const middleware = [
+        offset(8),
+        flip(boundary ? { boundary, padding: 8 } : undefined),
+        shift(boundary ? { boundary, padding: 8 } : { padding: 8 }),
+        ...(boundary
+          ? [
+              size({
+                boundary,
+                padding: 8,
+                apply({ availableWidth, availableHeight, elements }) {
+                  elements.floating.style.maxWidth = `${Math.max(0, availableWidth)}px`
+                  elements.floating.style.maxHeight = `${Math.max(0, availableHeight)}px`
+                }
+              })
+            ]
+          : [])
+      ]
       const { x, y } = await computePosition(virtualReference, tooltip, {
         placement: 'top',
         strategy: 'fixed',
-        middleware: [offset(8), flip(), shift({ padding: 8 })]
+        middleware
       })
       tooltip.style.left = `${Math.round(x)}px`
       tooltip.style.top = `${Math.round(y)}px`
