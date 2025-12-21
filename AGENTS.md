@@ -11,3 +11,10 @@ Always use Chinese to response.
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件）。
 - server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
+
+API 测试（curl）：
+```bash
+curl -sS -X POST "http://localhost:3000/api/querySentenceDefination" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"The old lighthouse stood against the relentless winds, its keeper devising ways to preserve the fragile glass."}'
+```
