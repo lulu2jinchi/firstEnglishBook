@@ -1,28 +1,29 @@
 <template>
   <div class="home-page">
     <label class="search-bar" aria-label="搜索书籍">
-      <img class="search-icon" :src="imgSearch" alt="" />
+      <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
       <input v-model="searchQuery" type="search" placeholder="Search" />
     </label>
 
     <div class="grid">
       <div v-for="book in filteredBooks" :key="book.file" class="card" role="button" @click="goRead(book)">
         <div class="cover">
-          <img :src="book.cover" :alt="book.title" loading="lazy" />
+          <img v-if="book.cover" :src="book.cover" :alt="book.title" loading="lazy" />
+          <div v-else class="cover-placeholder" aria-hidden="true">{{ book.title }}</div>
         </div>
-        <p class="title">{{ book.title }}</p>
+        <p class="title line-clamp-2">{{ book.title }}</p>
       </div>
     </div>
 
     <nav class="tab-bar" aria-label="底部导航">
       <button class="tab tab--active" type="button" aria-label="首页">
-        <img :src="imgIconTabHomeFill" alt="首页" />
+        <i class="fa-solid fa-house tab-icon" aria-hidden="true"></i>
       </button>
       <button class="tab add-btn" type="button" aria-label="添加">
-        <img :src="imgIcon" alt="添加书籍" />
+        <i class="fa-solid fa-plus tab-icon" aria-hidden="true"></i>
       </button>
       <button class="tab" type="button" aria-label="个人中心">
-        <img :src="imgPerson" alt="个人中心" />
+        <i class="fa-regular fa-user tab-icon" aria-hidden="true"></i>
       </button>
       <div class="home-indicator" aria-hidden="true" />
     </nav>
@@ -30,32 +31,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '#imports'
 
-const imgImage =
-  "https://www.figma.com/api/mcp/asset/610d2caf-7fb4-4ff2-bd83-cedaa2aa4780";
-const imgImage1 =
-  "https://www.figma.com/api/mcp/asset/f0393f3d-6cc1-467f-ac0a-205463ac5793";
-const imgImage2 =
-  "https://www.figma.com/api/mcp/asset/d7cd3153-dfe6-490d-b6ba-2580358bf645";
-const imgImage3 =
-  "https://www.figma.com/api/mcp/asset/43b7f465-3f56-42d5-bd83-a6d1d0afbc84";
-const imgImage4 =
-  "https://www.figma.com/api/mcp/asset/9b203a22-ab22-4bdb-94cd-d4544fc129ad";
-const imgImage5 =
-  "https://www.figma.com/api/mcp/asset/4cfe6862-edd7-4178-98bd-c168e69f157e";
-const imgImage6 =
-  "https://www.figma.com/api/mcp/asset/26ef5b15-6bae-47db-9f0d-1599ee94f3ef";
-const imgIcon =
-  "https://www.figma.com/api/mcp/asset/4afcf203-50c2-4b04-902e-b9f45e452fcc";
-const imgPerson =
-  "https://www.figma.com/api/mcp/asset/791220e3-a285-4d00-874b-48719186df68";
-const imgSearch =
-  "https://www.figma.com/api/mcp/asset/fd3a146b-3130-4cc7-8096-ce3564f6e306";
-const imgIconTabHomeFill =
-  "https://www.figma.com/api/mcp/asset/a9298d79-3cfb-4bfd-8701-53e43debda3d";
 const imgRightSide =
   "https://www.figma.com/api/mcp/asset/c06005b8-a781-41f5-aab5-5c7c1590b92f";
 const imgTime =
@@ -64,29 +43,29 @@ const imgTime =
 type BookItem = {
   file: string
   title: string
-  cover: string
+  cover: string | null
 }
 
 const router = useRouter()
 const searchQuery = ref('')
+const coverStates = ref<Record<string, string | null>>({})
+const loadingCovers = new Set<string>()
 
 const rawBooks = [
-  { file: 'book/Normal People (Sally Rooney) (Z-Library).epub', cover: imgImage },
-  { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub', cover: imgImage2 },
-  { file: 'book/oz.epub', cover: imgImage3 },
-  { file: 'book/rose.epub', cover: imgImage4 }
+  { file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
+  { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
+  { file: 'book/oz.epub' },
+  { file: 'book/rose.epub' }
 ]
 
 const books = computed<BookItem[]>(() =>
-  rawBooks.map((book, index) => {
+  rawBooks.map((book) => {
     const name = book.file.split('/').pop() || book.file
     const title = name.replace(/\.epub$/i, '').trim()
-    // 为封面做简单轮换，避免全部相同
-    const covers = [imgImage, imgImage2, imgImage3, imgImage4, imgImage5, imgImage6, imgImage1]
     return {
-      ...book,
+      file: book.file,
       title,
-      cover: covers[index % covers.length]
+      cover: coverStates.value[book.file] ?? null
     }
   })
 )
@@ -103,6 +82,30 @@ const filteredBooks = computed(() => {
 const goRead = (book: BookItem) => {
   router.push({ path: '/reader', query: { book: book.file } })
 }
+
+const fetchCover = async (file: string) => {
+  const { default: ePub } = await import('epubjs')
+  const book = ePub(encodeURI(file))
+  try {
+    await book.ready
+    const coverUrl = await book.coverUrl()
+    return coverUrl || null
+  } catch {
+    return null
+  } finally {
+    book.destroy?.()
+  }
+}
+
+onMounted(async () => {
+  await Promise.all(
+    rawBooks.map(async (book) => {
+      if (loadingCovers.has(book.file)) return
+      loadingCovers.add(book.file)
+      coverStates.value[book.file] = await fetchCover(book.file)
+    })
+  )
+})
 
 useHead({
   title: 'Home · First English Book',
@@ -165,9 +168,8 @@ useHead({
 }
 
 .search-icon {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+  font-size: 20px;
+  color: #6f6f6f;
 }
 
 .search-bar input {
@@ -204,7 +206,7 @@ useHead({
   aspect-ratio: 157 / 206;
   border-radius: 8px;
   overflow: hidden;
-  background: #f7f7f7;
+  background: #f2efe9;
 }
 
 .cover img {
@@ -215,11 +217,36 @@ useHead({
   object-fit: cover;
 }
 
+.cover-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  text-align: center;
+  color: #4b463c;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  background: linear-gradient(145deg, #f2efe9, #e7e1d6);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .title {
   margin: 0;
   font-size: 14px;
   line-height: 1.4;
   color: #000000;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .tab-bar {
@@ -250,10 +277,9 @@ useHead({
   cursor: pointer;
 }
 
-.tab img {
-  width: 24px;
-  height: 24px;
-  object-fit: contain;
+.tab-icon {
+  font-size: 22px;
+  color: #1d1b20;
 }
 
 .tab--active {
@@ -270,9 +296,8 @@ useHead({
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
-.add-btn img {
-  width: 28px;
-  height: 28px;
+.add-btn .tab-icon {
+  font-size: 26px;
 }
 
 .home-indicator {
