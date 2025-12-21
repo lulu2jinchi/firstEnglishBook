@@ -10,6 +10,7 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
+    "@floating-ui/dom": "^1.6.11",
     "dexie": "^3.2.7",
     "epubjs": "^0.3.93",
     "nuxt": "^4.2.1",

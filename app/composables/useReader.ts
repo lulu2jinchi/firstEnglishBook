@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
@@ -27,6 +28,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   const paragraphDefinitionStatus = new Set<string>()
   const paragraphDocumentMap = new Map<string, Document>()
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
+  let tooltipEl: HTMLDivElement | null = null
+  let tooltipCleanup: (() => void) | null = null
 
   async function ensureLib() {
     if (ePubLib) return ePubLib
@@ -323,6 +326,117 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     })
   }
 
+  const getTopWindow = () => {
+    if (typeof window === 'undefined') return null
+    return window.top || window
+  }
+
+  const ensureTooltipStyles = (doc: Document) => {
+    const styleId = 'reader-meaning-tooltip-styles'
+    if (doc.getElementById(styleId)) return
+    const styleEl = doc.createElement('style')
+    styleEl.id = styleId
+    styleEl.textContent = [
+      '.reader-meaning-tooltip {',
+      '  position: fixed;',
+      '  z-index: 9999;',
+      '  max-width: 280px;',
+      '  padding: 8px 10px;',
+      '  background: rgba(17, 24, 39, 0.95);',
+      '  color: #f8fafc;',
+      '  font-size: 13px;',
+      '  line-height: 1.4;',
+      '  border-radius: 8px;',
+      '  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);',
+      '  pointer-events: none;',
+      '  opacity: 0;',
+      '  transition: opacity 0.12s ease;',
+      '}',
+      '.reader-meaning-tooltip[data-show="true"] {',
+      '  opacity: 1;',
+      '}'
+    ].join('\n')
+    doc.head.appendChild(styleEl)
+  }
+
+  const ensureTooltipElement = () => {
+    const topWindow = getTopWindow()
+    if (!topWindow) return null
+    const topDoc = topWindow.document
+    ensureTooltipStyles(topDoc)
+    if (!tooltipEl || tooltipEl.ownerDocument !== topDoc) {
+      tooltipEl = topDoc.createElement('div')
+      tooltipEl.className = 'reader-meaning-tooltip'
+      tooltipEl.setAttribute('role', 'tooltip')
+      tooltipEl.dataset.show = 'false'
+      topDoc.body.appendChild(tooltipEl)
+    }
+    return tooltipEl
+  }
+
+  const hideTooltip = () => {
+    if (!tooltipEl) return
+    tooltipEl.dataset.show = 'false'
+    tooltipEl.textContent = ''
+    if (tooltipCleanup) {
+      tooltipCleanup()
+      tooltipCleanup = null
+    }
+  }
+
+  const buildVirtualReference = (span: HTMLElement, doc: Document) => {
+    return {
+      getBoundingClientRect: () => {
+        const spanRect = span.getBoundingClientRect()
+        const frameEl = doc.defaultView?.frameElement as HTMLElement | null
+        const frameRect = frameEl?.getBoundingClientRect()
+        const offsetLeft = frameRect ? frameRect.left : 0
+        const offsetTop = frameRect ? frameRect.top : 0
+        const left = spanRect.left + offsetLeft
+        const top = spanRect.top + offsetTop
+        const width = spanRect.width
+        const height = spanRect.height
+        return {
+          x: left,
+          y: top,
+          left,
+          top,
+          right: left + width,
+          bottom: top + height,
+          width,
+          height,
+          toJSON: () => ({})
+        } as DOMRect
+      },
+      getClientRects: () => [] as DOMRectList
+    }
+  }
+
+  const showTooltipForSpan = async (span: HTMLElement, doc: Document, meaning: string) => {
+    const tooltip = ensureTooltipElement()
+    if (!tooltip) return
+    tooltip.textContent = meaning
+    tooltip.dataset.show = 'true'
+
+    const virtualReference = buildVirtualReference(span, doc)
+    const updatePosition = async () => {
+      const { x, y } = await computePosition(virtualReference, tooltip, {
+        placement: 'top',
+        strategy: 'fixed',
+        middleware: [offset(8), flip(), shift({ padding: 8 })]
+      })
+      tooltip.style.left = `${Math.round(x)}px`
+      tooltip.style.top = `${Math.round(y)}px`
+    }
+
+    if (tooltipCleanup) {
+      tooltipCleanup()
+      tooltipCleanup = null
+    }
+    await updatePosition()
+    tooltipCleanup = autoUpdate(virtualReference, tooltip, updatePosition)
+  }
+
   const applyDefinitionToParagraph = (doc: Document, paragraphId: string, resp: SentenceDefinitionResponse) => {
     if (!resp.sentence || !resp.meaning) {
       // eslint-disable-next-line no-console
@@ -356,8 +470,14 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
       span.style.textDecoration = 'underline'
       span.style.cursor = 'pointer'
       span.addEventListener('click', () => {
+        const meaning = meaningMap[meaningId]
         // eslint-disable-next-line no-console
-        console.log(meaningMap[meaningId])
+        console.log(meaning)
+        if (meaning) {
+          void showTooltipForSpan(span, doc, meaning)
+        } else {
+          hideTooltip()
+        }
       })
     })
 
