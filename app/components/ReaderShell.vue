@@ -1,21 +1,5 @@
 <template>
   <div class="reader-shell">
-    <header class="reader-header">
-      <div class="title-block"></div>
-      <div class="header-actions">
-        <button class="mode-toggle" :disabled="isLoading" @click="toggleMode">
-          {{ modeButtonText }}
-        </button>
-      </div>
-    </header>
-
-    <section class="status-bar">
-      <span v-if="isLoading">正在加载电子书…</span>
-      <template v-else>
-        <span>位置：{{ currentLocation }}</span>
-        <span>进度：{{ progressText }}</span>
-      </template>
-    </section>
 
     <main class="reader-body">
       <button
@@ -85,8 +69,6 @@ const {
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding: 20px 24px 28px;
-  gap: 12px;
 }
 
 .reader-header {
@@ -207,7 +189,6 @@ const {
       transparent 34%
     ),
     #fff8dc;
-  border-radius: 16px;
   border: 1px solid rgba(203, 167, 71, 0.4);
   overflow: hidden;
 }
@@ -269,7 +250,6 @@ const {
 
 @media (max-width: 720px) {
   .reader-shell {
-    padding: 16px;
   }
 
   .reader-header {
