@@ -1,11 +1,50 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
+import Dexie, { type Table } from 'dexie'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
 type SentenceDefinitionResponse = {
   sentence?: string
   meaning?: Record<string, string>
+}
+
+type DefinitionRecord = {
+  key: string
+  bookKey: string
+  paragraphId: string
+  sentence: string
+  meaning: Record<string, string>
+  updatedAt: number
+}
+
+class ReaderDefinitionDB extends Dexie {
+  definitions!: Table<DefinitionRecord, string>
+
+  constructor() {
+    super('reader-definition-cache')
+    this.version(1).stores({
+      definitions: 'key, bookKey, paragraphId, updatedAt'
+    })
+    this.definitions = this.table('definitions')
+  }
+}
+
+let readerDefinitionDb: ReaderDefinitionDB | null = null
+
+const ensureReaderDefinitionDb = () => {
+  if (readerDefinitionDb) return readerDefinitionDb
+  if (typeof window === 'undefined') return null
+  readerDefinitionDb = new ReaderDefinitionDB()
+  return readerDefinitionDb
+}
+
+const buildBookKey = (path: string) => {
+  const fileName = path.split('/').pop() || 'book'
+  const baseName = fileName.replace(/\.[^.]+$/, '')
+  const words = baseName.match(/[a-z0-9]+/gi) || []
+  const initials = words.map((word) => word[0]).join('').slice(0, 8).toLowerCase()
+  return initials || 'book'
 }
 
 export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedRef<string>) {
@@ -17,6 +56,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
   const encodedBookPath = computed(() => encodeURI(bookPath.value))
+  const bookKey = computed(() => buildBookKey(bookPath.value))
 
   let book: any
   let rendition: any
@@ -24,7 +64,6 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
 
   // 缓存父页面消息监听器，便于卸载时移除
   let visibleMessageHandler: ((event: MessageEvent) => void) | null = null
-  const paragraphDefinitionCache = new Map<string, SentenceDefinitionResponse>()
   const paragraphDefinitionStatus = new Set<string>()
   const paragraphDocumentMap = new Map<string, Document>()
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
@@ -60,7 +99,6 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     const ePub = await ensureLib()
     rendition?.destroy?.()
     book?.destroy?.()
-    paragraphDefinitionCache.clear()
     paragraphDefinitionStatus.clear()
     paragraphDocumentMap.clear()
     documentParagraphIds = new WeakMap<Document, Set<string>>()
@@ -527,10 +565,20 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     const paragraphText = paragraph?.text
     if (!paragraphId || !paragraphText) return
 
-    const cached = paragraphDefinitionCache.get(paragraphId)
-    if (cached) {
-      applyDefinitionToParagraph(sourceDoc, paragraphId, cached)
-      return
+    const db = ensureReaderDefinitionDb()
+    const currentBookKey = bookKey.value
+    const cacheKey = `${currentBookKey}:${paragraphId}`
+    if (db) {
+      try {
+        const cached = await db.definitions.get(cacheKey)
+        if (cached?.sentence && cached?.meaning) {
+          applyDefinitionToParagraph(sourceDoc, paragraphId, cached)
+          return
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('读取 Dexie 缓存失败', error)
+      }
     }
 
     if (paragraphDefinitionStatus.has(paragraphId)) return
@@ -541,7 +589,21 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
       if (!resp?.sentence || !resp?.meaning) {
         return
       }
-      paragraphDefinitionCache.set(paragraphId, resp)
+      if (db) {
+        try {
+          await db.definitions.put({
+            key: cacheKey,
+            bookKey: currentBookKey,
+            paragraphId,
+            sentence: resp.sentence,
+            meaning: resp.meaning,
+            updatedAt: Date.now()
+          })
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('写入 Dexie 缓存失败', error)
+        }
+      }
       applyDefinitionToParagraph(sourceDoc, paragraphId, resp)
     } catch (error) {
       // eslint-disable-next-line no-console
