@@ -245,10 +245,19 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
       // 暴露给 iframe 内的调试入口（使用父窗口视口计算可见性）
       win.getVisibleParagraphs = () => getVisibleParagraphs()
 
-      const handleScrollOrResize = () => {
+      let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+      const runScrollOrResize = () => {
         visibleMap.clear()
         getVisibleParagraphs().forEach((item) => visibleMap.set(item.element, item))
         postVisibleParagraphs()
+      }
+
+      const handleScrollOrResize = () => {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer)
+        }
+        debounceTimer = setTimeout(runScrollOrResize, 1000)
       }
 
       // 内外层滚动/resize 都要监听，外层负责实际滚动可见区域
@@ -265,6 +274,10 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
         win.removeEventListener('resize', handleScrollOrResize)
         scrollContainer?.removeEventListener('scroll', handleScrollOrResize)
         scrollContainer?.removeEventListener('resize', handleScrollOrResize as any)
+        if (debounceTimer) {
+          clearTimeout(debounceTimer)
+          debounceTimer = null
+        }
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
         visibleMap.clear()
       })

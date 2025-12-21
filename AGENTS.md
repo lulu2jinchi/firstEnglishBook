@@ -18,3 +18,16 @@ curl -sS -X POST "http://localhost:3000/api/querySentenceDefination" \
   -H "Content-Type: application/json" \
   -d '{"text":"The old lighthouse stood against the relentless winds, its keeper devising ways to preserve the fragile glass."}'
 ```
+example output: 
+
+```json
+{
+  "sentence": "The old <1>lighthouse</1> stood against the <2>relentless</2> winds, its keeper <3>devising</3> ways to preserve the <4>fragile</4> glass.",
+  "meaning": {
+    "1": "灯塔，一种用于指引船只航行的建筑物。",
+    "2": "持续不断的，形容风势强劲且不停歇。",
+    "3": "想出或设计出方法或计划。",
+    "4": "易碎的，形容玻璃等物品容易破损。"
+  }
+}
+```
