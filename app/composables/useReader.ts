@@ -67,6 +67,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   const paragraphDefinitionStatus = new Set<string>()
   const paragraphDocumentMap = new Map<string, Document>()
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
+  const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
   let tooltipEl: HTMLDivElement | null = null
   let tooltipCleanup: (() => void) | null = null
 
@@ -84,6 +85,10 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   onBeforeUnmount(() => {
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
+    }
+    const topDoc = getTopWindow()?.document
+    if (topDoc) {
+      removeTooltipDismissHandler(topDoc)
     }
     rendition?.destroy?.()
     book?.destroy?.()
@@ -337,6 +342,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
           debounceTimer = null
         }
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
+        removeTooltipDismissHandler(doc)
         removeDocumentParagraphs(doc)
         visibleMap.clear()
       })
@@ -397,11 +403,32 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     doc.head.appendChild(styleEl)
   }
 
+  const attachTooltipDismissHandler = (doc: Document) => {
+    if (tooltipDismissHandlers.has(doc)) return
+    const handler = (event: MouseEvent) => {
+      const target = event.target as Element | null
+      const clickedMeaning = target?.closest?.('span[data-meaning-id]')
+      if (!clickedMeaning) {
+        hideTooltip()
+      }
+    }
+    doc.addEventListener('click', handler)
+    tooltipDismissHandlers.set(doc, handler)
+  }
+
+  const removeTooltipDismissHandler = (doc: Document) => {
+    const handler = tooltipDismissHandlers.get(doc)
+    if (!handler) return
+    doc.removeEventListener('click', handler)
+    tooltipDismissHandlers.delete(doc)
+  }
+
   const ensureTooltipElement = () => {
     const topWindow = getTopWindow()
     if (!topWindow) return null
     const topDoc = topWindow.document
     ensureTooltipStyles(topDoc)
+    attachTooltipDismissHandler(topDoc)
     if (!tooltipEl || tooltipEl.ownerDocument !== topDoc) {
       tooltipEl = topDoc.createElement('div')
       tooltipEl.className = 'reader-meaning-tooltip'
@@ -520,6 +547,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
       return true
     }
 
+    attachTooltipDismissHandler(doc)
     paragraphEl.innerHTML = buildSentenceHtml(resp.sentence)
     paragraphEl.dataset.annotated = 'true'
 
