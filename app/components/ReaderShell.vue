@@ -81,8 +81,8 @@ const {
 }
 
 .reader-shell {
-  min-height: 100vh;
-  height: 100vh;
+  min-height: 100dvh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 20px 24px 28px;

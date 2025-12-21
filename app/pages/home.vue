@@ -125,7 +125,7 @@ useHead({
 }
 
 .home-page {
-  min-height: 100vh;
+  min-height: 100dvh;
   box-sizing: border-box;
   background: #ffffff;
   padding: 12px 16px calc(120px + env(safe-area-inset-bottom, 0px));
