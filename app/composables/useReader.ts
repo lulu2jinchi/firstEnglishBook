@@ -2,6 +2,11 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, typ
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
+type SentenceDefinitionResponse = {
+  sentence?: string
+  meaning?: Record<string, string>
+}
+
 export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedRef<string>) {
   const isLoading = ref(true)
   const currentLocation = ref('—')
@@ -18,6 +23,10 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
 
   // 缓存父页面消息监听器，便于卸载时移除
   let visibleMessageHandler: ((event: MessageEvent) => void) | null = null
+  const paragraphDefinitionCache = new Map<string, SentenceDefinitionResponse>()
+  const paragraphDefinitionStatus = new Set<string>()
+  const paragraphDocumentMap = new Map<string, Document>()
+  let documentParagraphIds = new WeakMap<Document, Set<string>>()
 
   async function ensureLib() {
     if (ePubLib) return ePubLib
@@ -48,6 +57,10 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     const ePub = await ensureLib()
     rendition?.destroy?.()
     book?.destroy?.()
+    paragraphDefinitionCache.clear()
+    paragraphDefinitionStatus.clear()
+    paragraphDocumentMap.clear()
+    documentParagraphIds = new WeakMap<Document, Set<string>>()
 
     book = ePub(encodedBookPath.value)
     await book.ready
@@ -100,7 +113,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     const renderOptions: Record<string, any> = {
       width: '100%',
       height: '100%',
-      flow: mode
+      flow: mode,
+      allowScriptedContent: true
     }
 
     if (mode === 'paginated') {
@@ -165,6 +179,9 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
         el.classList.add('epub-paragraph')
         if (!el.dataset.paraId) {
           el.dataset.paraId = buildParagraphId(sectionHref, index + 1)
+        }
+        if (el.dataset.paraId) {
+          trackParagraphDocument(el.dataset.paraId, doc)
         }
         el.dataset.paraIndex = String(index)
       })
@@ -279,6 +296,7 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
           debounceTimer = null
         }
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
+        removeDocumentParagraphs(doc)
         visibleMap.clear()
       })
     })
@@ -292,6 +310,134 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     return `para-${safeSection || 'chapter'}-${index}`
   }
 
+  const escapeSelectorValue = (value: string) => {
+    if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+      return CSS.escape(value)
+    }
+    return value.replace(/["\\]/g, '\\$&')
+  }
+
+  const buildSentenceHtml = (sentence: string) => {
+    return sentence.replace(/<(\d+)>([\s\S]*?)<\/\1>/g, (_match, id, content) => {
+      return `<span data-meaning-id="${id}">${content}</span>`
+    })
+  }
+
+  const applyDefinitionToParagraph = (doc: Document, paragraphId: string, resp: SentenceDefinitionResponse) => {
+    if (!resp.sentence || !resp.meaning) {
+      // eslint-disable-next-line no-console
+      console.warn('段落释义缺少 sentence 或 meaning', { paragraphId, resp })
+      return false
+    }
+    console.log('selectorId', paragraphId)
+    console.log('doc: ', doc)
+    const selectorId = escapeSelectorValue(paragraphId)
+    const paragraphEl = doc.querySelector<HTMLElement>(`[data-para-id="${selectorId}"]`)
+    if (!paragraphEl) {
+      // eslint-disable-next-line no-console
+      console.warn('未找到段落元素', { paragraphId })
+      return false
+    }
+    if (paragraphEl.dataset.annotated === 'true') {
+      // eslint-disable-next-line no-console
+      console.log('段落已标注，跳过', { paragraphId })
+      return true
+    }
+
+    paragraphEl.innerHTML = buildSentenceHtml(resp.sentence)
+    paragraphEl.dataset.annotated = 'true'
+
+    const meaningMap = resp.meaning
+    const spans = Array.from(paragraphEl.querySelectorAll<HTMLSpanElement>('span[data-meaning-id]'))
+    // eslint-disable-next-line no-console
+    console.log('应用段落标注完成', { paragraphId, spanCount: spans.length })
+    spans.forEach((span) => {
+      const meaningId = span.dataset.meaningId || ''
+      span.style.textDecoration = 'underline'
+      span.style.cursor = 'pointer'
+      span.addEventListener('click', () => {
+        // eslint-disable-next-line no-console
+        console.log(meaningMap[meaningId])
+      })
+    })
+
+    return true
+  }
+
+  const fetchParagraphDefinition = async (text: string) => {
+    const response = await fetch('/api/querySentenceDefination', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    })
+
+    if (!response.ok) {
+      throw new Error(`API 请求失败: ${response.status}`)
+    }
+
+    return (await response.json()) as SentenceDefinitionResponse
+  }
+
+  const handleParagraphDefinition = async (paragraph: any, sourceDoc: Document) => {
+    const paragraphId = paragraph?.id
+    const paragraphText = paragraph?.text
+    if (!paragraphId || !paragraphText) return
+
+    const cached = paragraphDefinitionCache.get(paragraphId)
+    if (cached) {
+      applyDefinitionToParagraph(sourceDoc, paragraphId, cached)
+      return
+    }
+
+    if (paragraphDefinitionStatus.has(paragraphId)) return
+    paragraphDefinitionStatus.add(paragraphId)
+
+    try {
+      const resp = await fetchParagraphDefinition(paragraphText)
+      if (!resp?.sentence || !resp?.meaning) {
+        return
+      }
+      paragraphDefinitionCache.set(paragraphId, resp)
+      applyDefinitionToParagraph(sourceDoc, paragraphId, resp)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('段落释义请求失败', error)
+    } finally {
+      paragraphDefinitionStatus.delete(paragraphId)
+    }
+  }
+
+  const trackParagraphDocument = (paragraphId: string, doc: Document) => {
+    paragraphDocumentMap.set(paragraphId, doc)
+    let docParagraphs = documentParagraphIds.get(doc)
+    if (!docParagraphs) {
+      docParagraphs = new Set<string>()
+      documentParagraphIds.set(doc, docParagraphs)
+    }
+    docParagraphs.add(paragraphId)
+  }
+
+  const removeDocumentParagraphs = (doc: Document) => {
+    const docParagraphs = documentParagraphIds.get(doc)
+    if (!docParagraphs) return
+    docParagraphs.forEach((paragraphId) => paragraphDocumentMap.delete(paragraphId))
+    documentParagraphIds.delete(doc)
+  }
+
+  const handleVisibleParagraphs = async (paragraphs: any[], fallbackDoc?: Document | null) => {
+    if (!Array.isArray(paragraphs)) return
+    for (const paragraph of paragraphs.slice(0, 1)) {
+      const paragraphId = paragraph?.id
+      const targetDoc = paragraphId ? paragraphDocumentMap.get(paragraphId) || fallbackDoc : fallbackDoc
+      if (!targetDoc) {
+        // eslint-disable-next-line no-console
+        console.warn('未找到段落对应的 iframe 文档', { paragraphId })
+        continue
+      }
+      await handleParagraphDefinition(paragraph, targetDoc)
+    }
+  }
+
   /**
    * 父页面监听来自 iframe 的可见段落消息，并打印/拼接文本。
    */
@@ -301,9 +447,12 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     visibleMessageHandler = (event: MessageEvent) => {
       const data = event?.data || {}
       if (data.type !== 'epub-visible-paragraphs') return
+      const sourceWindow = event.source as Window | null
+      const sourceDoc = sourceWindow?.document || null
       // 打印可见段落与拼接文本，方便后续传递给 AI
       // eslint-disable-next-line no-console
       console.log('可见段落列表', data.paragraphs)
+      void handleVisibleParagraphs(data.paragraphs || [], sourceDoc)
       const combinedText = (data.paragraphs || [])
         .map((item: any) => item?.text || '')
         .filter((text: string) => text.trim())
