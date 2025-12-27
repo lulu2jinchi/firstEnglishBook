@@ -40,6 +40,9 @@ const bookPath = computed(() => {
     typeof queryPath === "string" && queryPath.trim()
       ? queryPath
       : "book/Normal People (Sally Rooney) (Z-Library).epub";
+  if (/^(blob:|data:|https?:|file:)/i.test(raw)) {
+    return raw;
+  }
   return raw.startsWith("/") ? raw : `/${raw}`;
 });
 

@@ -44,6 +44,8 @@ class ReaderDefinitionDB extends Dexie {
 
 let readerDefinitionDb: ReaderDefinitionDB | null = null
 
+const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
+
 const ensureReaderDefinitionDb = () => {
   if (readerDefinitionDb) return readerDefinitionDb
   if (typeof window === 'undefined') return null
@@ -149,7 +151,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     paragraphDocumentMap.clear()
     documentParagraphIds = new WeakMap<Document, Set<string>>()
 
-    book = ePub(encodedBookPath.value)
+    const openOptions = isEpubBlobUrl(bookPath.value) ? { openAs: 'epub' } : undefined
+    book = ePub(encodedBookPath.value, openOptions)
     await book.ready
     const savedCfi = await loadSavedLocation(bookKey.value)
     await buildRendition(readingMode.value, savedCfi)

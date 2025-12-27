@@ -5,13 +5,35 @@
       <input v-model="searchQuery" type="search" placeholder="Search" />
     </label>
 
+    <input
+      ref="fileInput"
+      class="sr-only"
+      type="file"
+      accept=".epub,application/epub+zip"
+      @change="handleUpload"
+    />
+
     <div class="grid">
-      <div v-for="book in filteredBooks" :key="book.file" class="card" role="button" @click="goRead(book)">
+      <div
+        v-for="book in filteredBooks"
+        :key="book.file"
+        class="card"
+        :class="{ 'card--uploading': book.isUploading }"
+        :role="book.isUploading ? 'presentation' : 'button'"
+        :aria-disabled="book.isUploading ? 'true' : 'false'"
+        :tabindex="book.isUploading ? -1 : 0"
+        @click="handleBookClick(book)"
+      >
         <div class="cover">
-          <img v-if="book.cover" :src="book.cover" :alt="book.title" loading="lazy" />
+          <div v-if="book.isUploading" class="cover-upload" aria-hidden="true">
+            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+            <span>上传中</span>
+          </div>
+          <img v-else-if="book.cover" :src="book.cover" :alt="book.title" loading="lazy" />
           <div v-else class="cover-placeholder" aria-hidden="true">{{ book.title }}</div>
         </div>
         <p class="title line-clamp-2">{{ book.title }}</p>
+        <p v-if="book.isUploading" class="upload-percent">{{ uploadLabel }}</p>
       </div>
     </div>
 
@@ -19,7 +41,7 @@
       <button class="tab tab--active" type="button" aria-label="首页">
         <i class="fa-solid fa-house tab-icon" aria-hidden="true"></i>
       </button>
-      <button class="tab add-btn" type="button" aria-label="添加">
+      <button class="tab add-btn" type="button" aria-label="添加" :disabled="isUploading" @click="triggerUpload">
         <i class="fa-solid fa-plus tab-icon" aria-hidden="true"></i>
       </button>
       <button class="tab" type="button" aria-label="个人中心">
@@ -31,7 +53,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '#imports'
 
@@ -40,28 +62,36 @@ const imgRightSide =
 const imgTime =
   "https://www.figma.com/api/mcp/asset/74f541a2-42b8-4a06-82da-9f562ec5b317";
 
+type RawBook = {
+  file: string
+  title?: string
+}
+
 type BookItem = {
   file: string
   title: string
   cover: string | null
+  isUploading?: boolean
 }
 
 const router = useRouter()
 const searchQuery = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
 const coverStates = ref<Record<string, string | null>>({})
 const loadingCovers = new Set<string>()
 
-const rawBooks = [
+const rawBooks = ref<RawBook[]>([
   { file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
   { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
   { file: 'book/oz.epub' },
   { file: 'book/rose.epub' }
-]
+])
 
 const books = computed<BookItem[]>(() =>
-  rawBooks.map((book) => {
+  rawBooks.value.map((book) => {
     const name = book.file.split('/').pop() || book.file
-    const title = name.replace(/\.epub$/i, '').trim()
+    const derivedTitle = name.replace(/\.epub$/i, '').trim()
+    const title = book.title?.trim() || derivedTitle || '未命名书籍'
     return {
       file: book.file,
       title,
@@ -73,19 +103,28 @@ const books = computed<BookItem[]>(() =>
 const filteredBooks = computed(() => {
   const list = books.value
   if (!searchQuery.value.trim()) {
-    return list
+    return uploadCard.value ? [uploadCard.value, ...list] : list
   }
   const query = searchQuery.value.toLowerCase()
-  return list.filter(book => book.title.toLowerCase().includes(query))
+  const filtered = list.filter(book => book.title.toLowerCase().includes(query))
+  return uploadCard.value ? [uploadCard.value, ...filtered] : filtered
 })
 
 const goRead = (book: BookItem) => {
   router.push({ path: '/reader', query: { book: book.file } })
 }
 
+const handleBookClick = (book: BookItem) => {
+  if (book.isUploading) return
+  goRead(book)
+}
+
+const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
+
 const fetchCover = async (file: string) => {
   const { default: ePub } = await import('epubjs')
-  const book = ePub(encodeURI(file))
+  const options = isEpubBlobUrl(file) ? { openAs: 'epub' } : undefined
+  const book = ePub(encodeURI(file), options)
   try {
     await book.ready
     const coverUrl = await book.coverUrl()
@@ -97,15 +136,103 @@ const fetchCover = async (file: string) => {
   }
 }
 
-onMounted(async () => {
-  await Promise.all(
-    rawBooks.map(async (book) => {
-      if (loadingCovers.has(book.file)) return
-      loadingCovers.add(book.file)
-      coverStates.value[book.file] = await fetchCover(book.file)
+const loadCoverForBook = async (file: string) => {
+  if (loadingCovers.has(file) || coverStates.value[file] !== undefined) return
+  loadingCovers.add(file)
+  try {
+    coverStates.value[file] = await fetchCover(file)
+  } finally {
+    loadingCovers.delete(file)
+  }
+}
+
+watch(
+  rawBooks,
+  (list) => {
+    list.forEach((book) => {
+      void loadCoverForBook(book.file)
     })
-  )
+  },
+  { deep: true, immediate: true }
+)
+
+type UploadStatus = 'idle' | 'reading' | 'success' | 'error'
+
+const uploadStatus = ref<UploadStatus>('idle')
+const uploadProgress = ref(0)
+const uploadingBookId = ref<string | null>(null)
+const uploadingBookTitle = ref('')
+
+const isUploading = computed(() => uploadStatus.value === 'reading')
+const showUploadCard = computed(() => uploadStatus.value === 'reading' || uploadStatus.value === 'error')
+const uploadLabel = computed(() => {
+  if (uploadStatus.value === 'error') return '读取失败'
+  return `${uploadProgress.value}%`
 })
+const uploadCard = computed<BookItem | null>(() => {
+  if (!showUploadCard.value) return null
+  return {
+    file: uploadingBookId.value || 'uploading',
+    title: uploadingBookTitle.value || '上传中',
+    cover: null,
+    isUploading: true
+  }
+})
+
+const triggerUpload = () => {
+  fileInput.value?.click()
+}
+
+const handleUpload = (event: Event) => {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  const isEpub =
+    file.name.toLowerCase().endsWith('.epub') || file.type === 'application/epub+zip'
+  if (!isEpub) {
+    uploadStatus.value = 'error'
+    uploadProgress.value = 0
+    uploadingBookId.value = `uploading-${Date.now()}`
+    uploadingBookTitle.value = file.name.replace(/\.epub$/i, '').trim() || '未命名书籍'
+    return
+  }
+
+  const fileName = file.name
+  uploadingBookId.value = `uploading-${Date.now()}`
+  uploadingBookTitle.value = fileName.replace(/\.epub$/i, '').trim() || '未命名书籍'
+  uploadStatus.value = 'reading'
+  uploadProgress.value = 0
+
+  const reader = new FileReader()
+
+  reader.onprogress = (progressEvent) => {
+    if (!progressEvent.lengthComputable) return
+    const percent = Math.min(
+      100,
+      Math.max(0, Math.round((progressEvent.loaded / progressEvent.total) * 100))
+    )
+    uploadProgress.value = percent
+  }
+
+  reader.onerror = () => {
+    uploadStatus.value = 'error'
+    uploadProgress.value = 0
+  }
+
+  reader.onload = () => {
+    const objectUrl = URL.createObjectURL(file)
+    const title = fileName.replace(/\.epub$/i, '').trim() || '未命名书籍'
+    rawBooks.value = [{ file: objectUrl, title }, ...rawBooks.value]
+    uploadProgress.value = 100
+    uploadStatus.value = 'success'
+    uploadingBookId.value = null
+    uploadingBookTitle.value = ''
+  }
+
+  reader.readAsArrayBuffer(file)
+}
 
 useHead({
   title: 'Home · First English Book',
@@ -187,6 +314,17 @@ useHead({
   color: #828282;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -200,6 +338,10 @@ useHead({
   cursor: pointer;
 }
 
+.card--uploading {
+  cursor: default;
+}
+
 .cover {
   position: relative;
   width: 100%;
@@ -207,6 +349,24 @@ useHead({
   border-radius: 8px;
   overflow: hidden;
   background: #f2efe9;
+}
+
+.cover-upload {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: #a56a25;
+  font-size: 14px;
+  font-weight: 600;
+  background: linear-gradient(145deg, #f2efe9, #e7e1d6);
+}
+
+.cover-upload i {
+  font-size: 28px;
 }
 
 .cover img {
@@ -247,6 +407,13 @@ useHead({
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.upload-percent {
+  margin: 0;
+  font-size: 12px;
+  color: #a56a25;
+  font-weight: 600;
 }
 
 .tab-bar {
