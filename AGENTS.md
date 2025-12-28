@@ -6,10 +6,14 @@ Always use Chinese to response.
 - app/app.vue：入口，渲染路由页面。
 - app/pages/index.vue：默认重定向到 Home。
 - app/pages/home.vue：书架首页（Figma 书架布局）。
+- app/pages/user.vue：个人中心页面，设置词汇量并同步 prompt.md 英语水平。
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
 - app/components/ReaderShell.vue：页面 UI、样式与基础布局。
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件）。
+- server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
+- server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
+- server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
 
 API 测试（curl）：

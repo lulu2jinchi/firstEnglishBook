@@ -44,7 +44,7 @@
       <button class="tab add-btn" type="button" aria-label="添加" :disabled="isUploading" @click="triggerUpload">
         <i class="fa-solid fa-plus tab-icon" aria-hidden="true"></i>
       </button>
-      <button class="tab" type="button" aria-label="个人中心">
+      <button class="tab" type="button" aria-label="个人中心" @click="goUser">
         <i class="fa-regular fa-user tab-icon" aria-hidden="true"></i>
       </button>
       <div class="home-indicator" aria-hidden="true" />
@@ -158,6 +158,10 @@ const goRead = (book: BookItem) => {
 const handleBookClick = (book: BookItem) => {
   if (book.isUploading) return
   goRead(book)
+}
+
+const goUser = () => {
+  router.push('/user')
 }
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
