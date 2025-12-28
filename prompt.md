@@ -3,7 +3,7 @@
 调用ai大模型的
 baseUrl=https://api.siliconflow.cn/v1
 api_key=xxx
-模型名称是deepseek-ai/DeepSeek-V3
+模型名称是Qwen/Qwen2-VL-72B-Instruct
 prompt是
 ```是你现在是一名「英语词汇精读老师 + JSON 生成器」。
 我的英语水平大约是「大学英语六级刚刚合格」，请根据这个水平来判断哪些单词 / 词组对我来说可能是难点或值得重点记忆。
