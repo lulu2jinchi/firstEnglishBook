@@ -116,6 +116,9 @@ export function useReader(
   const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
   let tooltipEl: HTMLDivElement | null = null
   let tooltipCleanup: (() => void) | null = null
+  let tooltipPageLeaveHandler: (() => void) | null = null
+  let tooltipVisibilityHandler: (() => void) | null = null
+  let tooltipTopScrollHandler: (() => void) | null = null
 
   async function ensureLib() {
     if (ePubLib) return ePubLib
@@ -125,6 +128,7 @@ export function useReader(
   }
 
   onMounted(async () => {
+    attachTooltipPageLeaveHandlers()
     if (!encodedBookPath.value) {
       isLoading.value = false
       return
@@ -136,6 +140,8 @@ export function useReader(
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
     }
+    removeTooltipPageLeaveHandlers()
+    hideTooltip()
     const topDoc = getTopWindow()?.document
     if (topDoc) {
       removeTooltipDismissHandler(topDoc)
@@ -385,6 +391,7 @@ export function useReader(
       let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
       const runScrollOrResize = () => {
+        hideTooltip()
         visibleMap.clear()
         getVisibleParagraphs().forEach((item) => visibleMap.set(item.element, item))
         postVisibleParagraphs()
@@ -526,6 +533,41 @@ export function useReader(
     if (tooltipCleanup) {
       tooltipCleanup()
       tooltipCleanup = null
+    }
+  }
+
+  const attachTooltipPageLeaveHandlers = () => {
+    if (tooltipPageLeaveHandler || typeof window === 'undefined') return
+    tooltipPageLeaveHandler = () => hideTooltip()
+    tooltipVisibilityHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        hideTooltip()
+      }
+    }
+    window.addEventListener('pagehide', tooltipPageLeaveHandler)
+    window.addEventListener('beforeunload', tooltipPageLeaveHandler)
+    document.addEventListener('visibilitychange', tooltipVisibilityHandler)
+
+    const topWindow = getTopWindow()
+    if (topWindow) {
+      tooltipTopScrollHandler = () => hideTooltip()
+      topWindow.addEventListener('scroll', tooltipTopScrollHandler, { passive: true, capture: true })
+    }
+  }
+
+  const removeTooltipPageLeaveHandlers = () => {
+    if (!tooltipPageLeaveHandler || typeof window === 'undefined') return
+    window.removeEventListener('pagehide', tooltipPageLeaveHandler)
+    window.removeEventListener('beforeunload', tooltipPageLeaveHandler)
+    tooltipPageLeaveHandler = null
+    if (tooltipVisibilityHandler) {
+      document.removeEventListener('visibilitychange', tooltipVisibilityHandler)
+      tooltipVisibilityHandler = null
+    }
+    const topWindow = getTopWindow()
+    if (topWindow && tooltipTopScrollHandler) {
+      topWindow.removeEventListener('scroll', tooltipTopScrollHandler, true)
+      tooltipTopScrollHandler = null
     }
   }
 
