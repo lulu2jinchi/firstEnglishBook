@@ -53,9 +53,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '#imports'
+import Dexie, { type Table } from 'dexie'
 
 const imgRightSide =
   "https://www.figma.com/api/mcp/asset/c06005b8-a781-41f5-aab5-5c7c1590b92f";
@@ -65,6 +66,7 @@ const imgTime =
 type RawBook = {
   file: string
   title?: string
+  id?: number
 }
 
 type BookItem = {
@@ -72,6 +74,35 @@ type BookItem = {
   title: string
   cover: string | null
   isUploading?: boolean
+  id?: number
+}
+
+type UploadRecord = {
+  id?: number
+  title: string
+  blob: Blob
+  createdAt: number
+}
+
+class UploadBookDB extends Dexie {
+  uploads!: Table<UploadRecord, number>
+
+  constructor() {
+    super('home-uploaded-books')
+    this.version(1).stores({
+      uploads: '++id, createdAt'
+    })
+    this.uploads = this.table('uploads')
+  }
+}
+
+let uploadBookDb: UploadBookDB | null = null
+
+const ensureUploadBookDb = () => {
+  if (uploadBookDb) return uploadBookDb
+  if (typeof window === 'undefined') return null
+  uploadBookDb = new UploadBookDB()
+  return uploadBookDb
 }
 
 const router = useRouter()
@@ -80,12 +111,17 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const coverStates = ref<Record<string, string | null>>({})
 const loadingCovers = new Set<string>()
 
-const rawBooks = ref<RawBook[]>([
+const baseBooks: RawBook[] = [
   { file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
   { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
   { file: 'book/oz.epub' },
   { file: 'book/rose.epub' }
-])
+]
+
+const uploadedBooks = ref<RawBook[]>([])
+const activeBookUrls = new Set<string>()
+
+const rawBooks = computed<RawBook[]>(() => [...uploadedBooks.value, ...baseBooks])
 
 const books = computed<BookItem[]>(() =>
   rawBooks.value.map((book) => {
@@ -95,7 +131,8 @@ const books = computed<BookItem[]>(() =>
     return {
       file: book.file,
       title,
-      cover: coverStates.value[book.file] ?? null
+      cover: coverStates.value[book.file] ?? null,
+      id: book.id
     }
   })
 )
@@ -111,6 +148,10 @@ const filteredBooks = computed(() => {
 })
 
 const goRead = (book: BookItem) => {
+  if (typeof book.id === 'number') {
+    router.push({ path: '/reader', query: { uploadId: String(book.id) } })
+    return
+  }
   router.push({ path: '/reader', query: { book: book.file } })
 }
 
@@ -155,6 +196,42 @@ watch(
   },
   { deep: true, immediate: true }
 )
+
+const revokeActiveBookUrls = () => {
+  activeBookUrls.forEach((url) => {
+    URL.revokeObjectURL(url)
+  })
+  activeBookUrls.clear()
+}
+
+const loadUploadedBooks = async () => {
+  const db = ensureUploadBookDb()
+  if (!db) return
+  try {
+    const records = await db.uploads.orderBy('createdAt').reverse().toArray()
+    revokeActiveBookUrls()
+    uploadedBooks.value = records.map((record) => {
+      const url = URL.createObjectURL(record.blob)
+      activeBookUrls.add(url)
+      return {
+        id: record.id,
+        file: url,
+        title: record.title
+      }
+    })
+  } catch (error) {
+    // eslint-disable-next-line no-console
+    console.warn('读取上传书籍失败', error)
+  }
+}
+
+onMounted(() => {
+  void loadUploadedBooks()
+})
+
+onBeforeUnmount(() => {
+  revokeActiveBookUrls()
+})
 
 type UploadStatus = 'idle' | 'reading' | 'success' | 'error'
 
@@ -221,10 +298,30 @@ const handleUpload = (event: Event) => {
     uploadProgress.value = 0
   }
 
-  reader.onload = () => {
+  reader.onload = async () => {
     const objectUrl = URL.createObjectURL(file)
     const title = fileName.replace(/\.epub$/i, '').trim() || '未命名书籍'
-    rawBooks.value = [{ file: objectUrl, title }, ...rawBooks.value]
+    activeBookUrls.add(objectUrl)
+
+    const db = ensureUploadBookDb()
+    let recordId: number | null = null
+    if (db) {
+      try {
+        recordId = await db.uploads.add({
+          title,
+          blob: file,
+          createdAt: Date.now()
+        })
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('保存上传书籍失败', error)
+      }
+    }
+
+    uploadedBooks.value = [
+      { id: recordId ?? undefined, file: objectUrl, title },
+      ...uploadedBooks.value
+    ]
     uploadProgress.value = 100
     uploadStatus.value = 'success'
     uploadingBookId.value = null

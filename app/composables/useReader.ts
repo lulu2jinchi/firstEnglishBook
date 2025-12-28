@@ -90,7 +90,10 @@ const saveReaderLocation = async (bookKey: string, cfi?: string | null) => {
   }
 }
 
-export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedRef<string>) {
+export function useReader(
+  viewerEl: Ref<HTMLElement | null>,
+  bookPath: ComputedRef<string | null>
+) {
   const isLoading = ref(true)
   const currentLocation = ref('—')
   const progressText = ref('0%')
@@ -98,8 +101,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   const isPaginated = computed(() => readingMode.value === 'paginated')
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
-  const encodedBookPath = computed(() => encodeURI(bookPath.value))
-  const bookKey = computed(() => buildBookKey(bookPath.value))
+  const encodedBookPath = computed(() => (bookPath.value ? encodeURI(bookPath.value) : ''))
+  const bookKey = computed(() => buildBookKey(bookPath.value || 'book'))
 
   let book: any
   let rendition: any
@@ -122,6 +125,10 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
   }
 
   onMounted(async () => {
+    if (!encodedBookPath.value) {
+      isLoading.value = false
+      return
+    }
     await openBook()
   })
 
@@ -137,13 +144,21 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     book?.destroy?.()
   })
 
-  watch(encodedBookPath, async () => {
+  watch(encodedBookPath, async (nextPath) => {
+    if (!nextPath) {
+      isLoading.value = false
+      return
+    }
     isLoading.value = true
     await openBook()
     isLoading.value = false
   })
 
   async function openBook() {
+    if (!encodedBookPath.value) {
+      isLoading.value = false
+      return
+    }
     const ePub = await ensureLib()
     rendition?.destroy?.()
     book?.destroy?.()
@@ -151,7 +166,8 @@ export function useReader(viewerEl: Ref<HTMLElement | null>, bookPath: ComputedR
     paragraphDocumentMap.clear()
     documentParagraphIds = new WeakMap<Document, Set<string>>()
 
-    const openOptions = isEpubBlobUrl(bookPath.value) ? { openAs: 'epub' } : undefined
+    const openOptions =
+      bookPath.value && isEpubBlobUrl(bookPath.value) ? { openAs: 'epub' } : undefined
     book = ePub(encodedBookPath.value, openOptions)
     await book.ready
     const savedCfi = await loadSavedLocation(bookKey.value)

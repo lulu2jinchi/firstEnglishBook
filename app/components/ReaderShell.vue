@@ -26,24 +26,101 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import Dexie, { type Table } from "dexie";
 import { useReader } from "~/composables/useReader";
 
 const viewerEl = ref<HTMLDivElement | null>(null);
 
 const route = useRoute();
 
-const bookPath = computed(() => {
-  const queryPath = route.query.book;
+type UploadRecord = {
+  id?: number;
+  title: string;
+  blob: Blob;
+  createdAt: number;
+};
+
+class UploadBookDB extends Dexie {
+  uploads!: Table<UploadRecord, number>;
+
+  constructor() {
+    super("home-uploaded-books");
+    this.version(1).stores({
+      uploads: "++id, createdAt",
+    });
+    this.uploads = this.table("uploads");
+  }
+}
+
+let uploadBookDb: UploadBookDB | null = null;
+
+const ensureUploadBookDb = () => {
+  if (uploadBookDb) return uploadBookDb;
+  if (typeof window === "undefined") return null;
+  uploadBookDb = new UploadBookDB();
+  return uploadBookDb;
+};
+
+const objectUrl = ref<string | null>(null);
+const bookPath = ref<string | null>(null);
+
+const clearObjectUrl = () => {
+  if (objectUrl.value) {
+    URL.revokeObjectURL(objectUrl.value);
+    objectUrl.value = null;
+  }
+};
+
+const resolveBookPath = async () => {
+  const uploadId = route.query.uploadId;
+  const bookQuery = route.query.book;
+
+  if (typeof uploadId === "string" && uploadId.trim()) {
+    clearObjectUrl();
+    const db = ensureUploadBookDb();
+    if (db) {
+      const id = Number(uploadId);
+      if (!Number.isNaN(id)) {
+        try {
+          const record = await db.uploads.get(id);
+          if (record?.blob) {
+            objectUrl.value = URL.createObjectURL(record.blob);
+            bookPath.value = objectUrl.value;
+            return;
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn("读取上传书籍失败", error);
+        }
+      }
+    }
+    bookPath.value = null;
+    return;
+  }
+
   const raw =
-    typeof queryPath === "string" && queryPath.trim()
-      ? queryPath
+    typeof bookQuery === "string" && bookQuery.trim()
+      ? bookQuery
       : "book/Normal People (Sally Rooney) (Z-Library).epub";
   if (/^(blob:|data:|https?:|file:)/i.test(raw)) {
-    return raw;
+    bookPath.value = raw;
+    return;
   }
-  return raw.startsWith("/") ? raw : `/${raw}`;
+  bookPath.value = raw.startsWith("/") ? raw : `/${raw}`;
+};
+
+watch(
+  () => route.query,
+  () => {
+    void resolveBookPath();
+  },
+  { deep: true, immediate: true }
+);
+
+onBeforeUnmount(() => {
+  clearObjectUrl();
 });
 
 const {
@@ -55,7 +132,7 @@ const {
   toggleMode,
   goPrev,
   goNext,
-} = useReader(viewerEl, bookPath);
+} = useReader(viewerEl, computed(() => bookPath.value));
 </script>
 
 <style scoped>
