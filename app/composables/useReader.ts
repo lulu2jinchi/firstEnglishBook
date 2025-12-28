@@ -776,7 +776,7 @@ export function useReader(
 
   const handleVisibleParagraphs = async (paragraphs: any[], fallbackDoc?: Document | null) => {
     if (!Array.isArray(paragraphs)) return
-    for (const paragraph of paragraphs.slice(0, 1)) {
+    for (const paragraph of paragraphs) {
       const paragraphId = paragraph?.id
       const targetDoc = paragraphId ? paragraphDocumentMap.get(paragraphId) || fallbackDoc : fallbackDoc
       if (!targetDoc) {

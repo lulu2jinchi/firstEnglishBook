@@ -32,8 +32,24 @@ const parseJsonContent = (raw: string) => {
     return tryParseJson(fenced[1].trim())
   }
 
+  const firstBrace = raw.indexOf('{')
+  const lastBrace = raw.lastIndexOf('}')
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = raw.slice(firstBrace, lastBrace + 1)
+    const extracted = tryParseJson(candidate)
+    if (extracted) return extracted
+  }
+
   return null
 }
+
+const strictJsonSystemPrompt =
+  '你是严格的 JSON 生成器。只输出一个合法 JSON 对象，不要输出任何额外文字、解释或代码块。'
+
+const buildMessages = (prompt: string) => [
+  { role: 'system', content: strictJsonSystemPrompt },
+  { role: 'user', content: prompt }
+]
 
 const buildPrompt = async (text: string) => {
   const promptTemplate = await readPromptTemplate()
@@ -64,6 +80,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: '缺少英文段落 text' })
   }
 
+
   const {
     siliconflow: { apiKey, baseUrl, model }
   } = useRuntimeConfig()
@@ -79,6 +96,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: '读取 prompt.md 失败' })
   }
 
+
   const response = await $fetch<ChatCompletionResponse>(`${baseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -87,7 +105,7 @@ export default defineEventHandler(async (event) => {
     },
     body: {
       model,
-      messages: [{ role: 'user', content: prompt }],
+      messages: buildMessages(prompt),
       stream: false,
       temperature: 0.3
     }
@@ -98,6 +116,7 @@ export default defineEventHandler(async (event) => {
   if (!content) {
     throw createError({ statusCode: 502, statusMessage: '大模型未返回内容' })
   }
+
 
   const parsed = parseJsonContent(content)
 
