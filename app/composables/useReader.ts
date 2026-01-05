@@ -119,6 +119,71 @@ export function useReader(
   let tooltipPageLeaveHandler: (() => void) | null = null
   let tooltipVisibilityHandler: (() => void) | null = null
   let tooltipTopScrollHandler: (() => void) | null = null
+  const definitionQueue: Array<() => Promise<void>> = []
+  const requestIntervalMs = 2000
+  const maxBackoffMs = 120000
+  let queueRunning = false
+  let nextAllowedAt = 0
+  let backoffMs = 0
+
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const isRateLimitError = (status?: number, body?: string) => {
+    if (status === 429) return true
+    if (!body) return false
+    const text = body.toLowerCase()
+    return (
+      text.includes('rpm limit exceeded') ||
+      text.includes('rate limit') ||
+      text.includes('too many requests') ||
+      text.includes('identity verification')
+    )
+  }
+
+  const bumpBackoff = (reason?: string) => {
+    const next = backoffMs ? Math.min(backoffMs * 2, maxBackoffMs) : 15000
+    backoffMs = next
+    nextAllowedAt = Math.max(nextAllowedAt, Date.now() + backoffMs)
+    // eslint-disable-next-line no-console
+    console.warn('触发限速，暂停请求', { backoffMs, reason })
+  }
+
+  const resetBackoff = () => {
+    backoffMs = 0
+  }
+
+  const runDefinitionQueue = async () => {
+    if (queueRunning) return
+    queueRunning = true
+    while (definitionQueue.length > 0) {
+      const job = definitionQueue.shift()
+      if (!job) continue
+      const waitMs = Math.max(0, nextAllowedAt - Date.now())
+      if (waitMs > 0) {
+        await sleep(waitMs)
+      }
+      const startedAt = Date.now()
+      try {
+        await job()
+      } finally {
+        nextAllowedAt = Math.max(nextAllowedAt, startedAt + requestIntervalMs)
+      }
+    }
+    queueRunning = false
+  }
+
+  const enqueueDefinitionTask = (task: () => Promise<void>) =>
+    new Promise<void>((resolve, reject) => {
+      definitionQueue.push(async () => {
+        try {
+          await task()
+          resolve()
+        } catch (error) {
+          reject(error)
+        }
+      })
+      void runDefinitionQueue()
+    })
 
   async function ensureLib() {
     if (ePubLib) return ePubLib
@@ -312,6 +377,26 @@ export function useReader(
         el.dataset.paraIndex = String(index)
       })
 
+      const getParagraphPayload = (paragraphEl: HTMLElement) => {
+        const paragraphId = paragraphEl.dataset.paraId
+        if (!paragraphId) return null
+        const text = normalizeText(paragraphEl.innerText || paragraphEl.textContent || '')
+        if (!text) return null
+        return { id: paragraphId, text }
+      }
+
+      const handleDblClick = (event: MouseEvent) => {
+        const target = event.target as Element | null
+        if (!target) return
+        const paragraphEl = target.closest<HTMLElement>('[data-para-id]')
+        if (!paragraphEl) return
+        const payload = getParagraphPayload(paragraphEl)
+        if (!payload) return
+        void handleParagraphDefinition(payload, doc)
+      }
+
+      doc.addEventListener('dblclick', handleDblClick)
+
       const visibleMap = new Map<HTMLElement, { id: string; text: string; element: HTMLElement; visibleRatio: number }>()
       let lastPayloadKey = ''
 
@@ -418,6 +503,7 @@ export function useReader(
         win.removeEventListener('resize', handleScrollOrResize)
         scrollContainer?.removeEventListener('scroll', handleScrollOrResize)
         scrollContainer?.removeEventListener('resize', handleScrollOrResize as any)
+        doc.removeEventListener('dblclick', handleDblClick)
         if (debounceTimer) {
           clearTimeout(debounceTimer)
           debounceTimer = null
@@ -698,7 +784,16 @@ export function useReader(
     })
 
     if (!response.ok) {
-      throw new Error(`API 请求失败: ${response.status}`)
+      let bodyText = ''
+      try {
+        bodyText = await response.text()
+      } catch {
+        bodyText = ''
+      }
+      const error = new Error(`API 请求失败: ${response.status}`)
+      ;(error as Error & { status?: number }).status = response.status
+      ;(error as Error & { body?: string }).body = bodyText
+      throw error
     }
 
     return (await response.json()) as SentenceDefinitionResponse
@@ -729,26 +824,38 @@ export function useReader(
     paragraphDefinitionStatus.add(paragraphId)
 
     try {
-      const resp = await fetchParagraphDefinition(paragraphText)
-      if (!resp?.sentence || !resp?.meaning) {
-        return
-      }
-      if (db) {
+      await enqueueDefinitionTask(async () => {
         try {
-          await db.definitions.put({
-            key: cacheKey,
-            bookKey: currentBookKey,
-            paragraphId,
-            sentence: resp.sentence,
-            meaning: resp.meaning,
-            updatedAt: Date.now()
-          })
+          const resp = await fetchParagraphDefinition(paragraphText)
+          resetBackoff()
+          if (!resp?.sentence || !resp?.meaning) {
+            return
+          }
+          if (db) {
+            try {
+              await db.definitions.put({
+                key: cacheKey,
+                bookKey: currentBookKey,
+                paragraphId,
+                sentence: resp.sentence,
+                meaning: resp.meaning,
+                updatedAt: Date.now()
+              })
+            } catch (error) {
+              // eslint-disable-next-line no-console
+              console.warn('写入 Dexie 缓存失败', error)
+            }
+          }
+          applyDefinitionToParagraph(sourceDoc, paragraphId, resp)
         } catch (error) {
-          // eslint-disable-next-line no-console
-          console.warn('写入 Dexie 缓存失败', error)
+          const status = (error as Error & { status?: number }).status
+          const body = (error as Error & { body?: string }).body
+          if (isRateLimitError(status, body)) {
+            bumpBackoff(body || String(error))
+          }
+          throw error
         }
-      }
-      applyDefinitionToParagraph(sourceDoc, paragraphId, resp)
+      })
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn('段落释义请求失败', error)
