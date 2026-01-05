@@ -13,7 +13,16 @@ interface ChatCompletionResponse {
   choices?: ChatChoice[]
 }
 
-type RequestBody = { text?: string; paragraph?: string } | string | null
+type RequestBody =
+  | {
+      text?: string
+      paragraph?: string
+      baseUrl?: string
+      apiKey?: string
+      model?: string
+    }
+  | string
+  | null
 
 const tryParseJson = (text: string) => {
   try {
@@ -73,20 +82,39 @@ const normalizeText = (body: RequestBody): string => {
   return ''
 }
 
+const pickConfigValue = (value?: string, fallback?: string) => {
+  const trimmed = value?.trim() ?? ''
+  if (trimmed) return trimmed
+  return fallback?.trim() ?? ''
+}
+
+const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
+
 export default defineEventHandler(async (event) => {
-  const paragraph = normalizeText(await readBody<RequestBody>(event))
+  const body = await readBody<RequestBody>(event)
+  const paragraph = normalizeText(body)
 
   if (!paragraph) {
     throw createError({ statusCode: 400, statusMessage: '缺少英文段落 text' })
   }
 
-
-  const {
-    siliconflow: { apiKey, baseUrl, model }
-  } = useRuntimeConfig()
+  const { siliconflow } = useRuntimeConfig()
+  const bodyConfig = typeof body === 'object' && body !== null ? body : {}
+  const apiKey = pickConfigValue(bodyConfig.apiKey, siliconflow.apiKey)
+  const baseUrlRaw = pickConfigValue(bodyConfig.baseUrl, siliconflow.baseUrl)
+  const model = pickConfigValue(bodyConfig.model, siliconflow.model)
+  const baseUrl = baseUrlRaw ? normalizeBaseUrl(baseUrlRaw) : ''
 
   if (!apiKey) {
-    throw createError({ statusCode: 500, statusMessage: '未配置 SILICONFLOW_API_KEY' })
+    throw createError({ statusCode: 400, statusMessage: '未配置 API Key' })
+  }
+
+  if (!baseUrl) {
+    throw createError({ statusCode: 400, statusMessage: '未配置 Base URL' })
+  }
+
+  if (!model) {
+    throw createError({ statusCode: 400, statusMessage: '未配置模型名称' })
   }
 
   let prompt = ''

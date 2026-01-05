@@ -9,6 +9,12 @@ type SentenceDefinitionResponse = {
   meaning?: Record<string, string>
 }
 
+type ModelConfig = {
+  baseUrl: string
+  apiKey: string
+  model: string
+}
+
 type DefinitionRecord = {
   key: string
   bookKey: string
@@ -45,12 +51,33 @@ class ReaderDefinitionDB extends Dexie {
 let readerDefinitionDb: ReaderDefinitionDB | null = null
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
+const modelConfigStorageKey = 'first-english-book-model-config'
 
 const ensureReaderDefinitionDb = () => {
   if (readerDefinitionDb) return readerDefinitionDb
   if (typeof window === 'undefined') return null
   readerDefinitionDb = new ReaderDefinitionDB()
   return readerDefinitionDb
+}
+
+const readModelConfigFromStorage = (): ModelConfig | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(modelConfigStorageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<ModelConfig>
+    const baseUrl = parsed.baseUrl?.trim() || ''
+    const apiKey = parsed.apiKey?.trim() || ''
+    const model = parsed.model?.trim() || ''
+    if (!baseUrl || !apiKey || !model) return null
+    return {
+      baseUrl: baseUrl.replace(/\/+$/, ''),
+      apiKey,
+      model
+    }
+  } catch {
+    return null
+  }
 }
 
 const buildBookKey = (path: string) => {
@@ -777,10 +804,12 @@ export function useReader(
   }
 
   const fetchParagraphDefinition = async (text: string) => {
+    const modelConfig = readModelConfigFromStorage()
+    const payload = modelConfig ? { text, ...modelConfig } : { text }
     const response = await fetch('/api/querySentenceDefination', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text })
+      body: JSON.stringify(payload)
     })
 
     if (!response.ok) {
