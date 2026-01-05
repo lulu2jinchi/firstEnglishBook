@@ -14,6 +14,7 @@ Always use Chinese to response.
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
+- server/assets/prompt.md：部署环境使用的 prompt 模板。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
 
 API 测试（curl）：

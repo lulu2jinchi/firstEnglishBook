@@ -6,7 +6,7 @@ const promptFilePath = resolve(process.cwd(), 'prompt.md')
 const levelLinePattern = /我的英语水平大约是「([^」]+)」/
 const levelScopePattern = /对「[^」]+」来说\*\*可能不熟/
 const vocabNumberPattern = /(\d{2,6})/
-const promptAssetKey = 'prompt/prompt.md'
+const promptAssetKey = 'prompt.md'
 let runtimePromptOverride: string | null = null
 
 export type PromptLevel = {
