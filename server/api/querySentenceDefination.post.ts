@@ -1,5 +1,5 @@
 import { createError } from 'h3'
-import { readPromptTemplate } from '../utils/prompt'
+import { applyPromptLevel, readPromptTemplate } from '../utils/prompt'
 
 interface ChatChoiceMessage {
   content?: string
@@ -20,6 +20,7 @@ type RequestBody =
       baseUrl?: string
       apiKey?: string
       model?: string
+      vocabularySize?: number | string
     }
   | string
   | null
@@ -60,11 +61,6 @@ const buildMessages = (prompt: string) => [
   { role: 'user', content: prompt }
 ]
 
-const buildPrompt = async (text: string) => {
-  const promptTemplate = await readPromptTemplate()
-  return promptTemplate.replace('{{TEXT}}', text)
-}
-
 const normalizeText = (body: RequestBody): string => {
   if (typeof body === 'string') {
     return body.trim()
@@ -89,6 +85,16 @@ const pickConfigValue = (value?: string, fallback?: string) => {
 }
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
+const normalizeVocabularySize = (raw: number) => {
+  if (!Number.isFinite(raw)) return null
+  const rounded = Math.round(raw)
+  const min = 1000
+  const max = 20000
+  if (rounded < min || rounded > max) {
+    return null
+  }
+  return rounded
+}
 
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
@@ -104,6 +110,12 @@ export default defineEventHandler(async (event) => {
   const baseUrlRaw = pickConfigValue(bodyConfig.baseUrl, siliconflow.baseUrl)
   const model = pickConfigValue(bodyConfig.model, siliconflow.model)
   const baseUrl = baseUrlRaw ? normalizeBaseUrl(baseUrlRaw) : ''
+  const hasVocabularySize = Object.prototype.hasOwnProperty.call(bodyConfig, 'vocabularySize')
+  const normalizedVocabularySize = normalizeVocabularySize(Number(bodyConfig.vocabularySize))
+
+  if (hasVocabularySize && normalizedVocabularySize === null) {
+    throw createError({ statusCode: 400, statusMessage: '词汇量需要在 1000 到 20000 之间' })
+  }
 
   if (!apiKey) {
     throw createError({ statusCode: 400, statusMessage: '未配置 API Key' })
@@ -119,7 +131,10 @@ export default defineEventHandler(async (event) => {
 
   let prompt = ''
   try {
-    prompt = await buildPrompt(paragraph)
+    const promptTemplate = await readPromptTemplate()
+    const tunedTemplate =
+      normalizedVocabularySize !== null ? applyPromptLevel(promptTemplate, normalizedVocabularySize) : promptTemplate
+    prompt = tunedTemplate.replace('{{TEXT}}', paragraph)
   } catch {
     throw createError({ statusCode: 500, statusMessage: '读取 prompt.md 失败' })
   }

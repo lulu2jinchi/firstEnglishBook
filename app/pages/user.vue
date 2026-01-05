@@ -8,7 +8,7 @@
           <p class="card-subtitle">调整词汇难度匹配你的阅读水平</p>
         </div>
         <span class="badge" :class="{ 'badge--loading': isLoading }">
-          {{ isLoading ? '同步中' : '已同步' }}
+          {{ isLoading ? '读取中' : hasLocalLevel ? '已保存' : '未保存' }}
         </span>
       </div>
 
@@ -121,17 +121,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useHead } from '#imports'
 import { useRouter } from 'vue-router'
 
-type ReaderLevelResponse = {
-  levelText: string
-  vocabularySize: number | null
-}
-
 const router = useRouter()
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
 const rangeStep = 500
 const inputStep = 100
 const fallbackVocabularySize = 6000
+const vocabularyStorageKey = 'first-english-book-vocabulary-size'
 const modelConfigStorageKey = 'first-english-book-model-config'
 
 const vocabularySize = ref(fallbackVocabularySize)
@@ -140,6 +136,7 @@ const currentLevelText = ref('')
 const saveStatus = ref('')
 const isLoading = ref(false)
 const isSaving = ref(false)
+const hasLocalLevel = ref(false)
 
 const modelBaseUrl = ref('')
 const modelApiKey = ref('')
@@ -165,6 +162,19 @@ const resetToSuggested = () => {
 }
 
 const normalizeBaseUrl = (value: string) => value.trim().replace(/\/+$/, '')
+
+const readLocalVocabularySize = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(vocabularyStorageKey)
+    if (!raw) return null
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return null
+    return clampVocabularySize(parsed)
+  } catch {
+    return null
+  }
+}
 
 const readLocalModelConfig = () => {
   if (typeof window === 'undefined') return null
@@ -194,19 +204,13 @@ const loadLevel = async () => {
   isLoading.value = true
   saveStatus.value = ''
   try {
-    const data = await $fetch<ReaderLevelResponse>('/api/readerLevel')
-    if (typeof data.vocabularySize === 'number') {
-      const normalized = clampVocabularySize(data.vocabularySize)
-      vocabularySize.value = normalized
-      suggestedVocabularySize.value = normalized
-    } else {
-      suggestedVocabularySize.value = fallbackVocabularySize
-    }
-    if (data.levelText) {
-      currentLevelText.value = data.levelText
-    }
-  } catch (error) {
-    saveStatus.value = '读取词汇量失败，请稍后重试'
+    const localValue = readLocalVocabularySize()
+    vocabularySize.value = localValue ?? fallbackVocabularySize
+    suggestedVocabularySize.value = fallbackVocabularySize
+    currentLevelText.value = levelTextPreview.value
+    hasLocalLevel.value = typeof localValue === 'number'
+  } catch {
+    saveStatus.value = '读取本地词汇量失败，请检查浏览器存储权限'
   } finally {
     isLoading.value = false
   }
@@ -232,15 +236,16 @@ const saveLevel = async () => {
   saveStatus.value = ''
   try {
     const normalized = clampVocabularySize(vocabularySize.value)
-    const data = await $fetch<ReaderLevelResponse>('/api/readerLevel', {
-      method: 'POST',
-      body: { vocabularySize: normalized }
-    })
+    if (typeof window === 'undefined') {
+      throw new Error('localStorage 不可用')
+    }
+    window.localStorage.setItem(vocabularyStorageKey, String(normalized))
     vocabularySize.value = normalized
-    currentLevelText.value = data.levelText || levelTextPreview.value
-    saveStatus.value = '已保存到 prompt.md'
-  } catch (error) {
-    saveStatus.value = '保存失败，请检查数值范围'
+    currentLevelText.value = levelTextPreview.value
+    hasLocalLevel.value = true
+    saveStatus.value = '已保存到浏览器'
+  } catch {
+    saveStatus.value = '保存失败，请检查浏览器存储权限'
   } finally {
     isSaving.value = false
   }

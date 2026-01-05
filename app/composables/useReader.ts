@@ -52,6 +52,9 @@ let readerDefinitionDb: ReaderDefinitionDB | null = null
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
 const modelConfigStorageKey = 'first-english-book-model-config'
+const vocabularyStorageKey = 'first-english-book-vocabulary-size'
+const minVocabularySize = 1000
+const maxVocabularySize = 20000
 
 const ensureReaderDefinitionDb = () => {
   if (readerDefinitionDb) return readerDefinitionDb
@@ -75,6 +78,21 @@ const readModelConfigFromStorage = (): ModelConfig | null => {
       apiKey,
       model
     }
+  } catch {
+    return null
+  }
+}
+
+const readVocabularySizeFromStorage = (): number | null => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(vocabularyStorageKey)
+    if (!raw) return null
+    const parsed = Number(raw)
+    if (!Number.isFinite(parsed)) return null
+    const rounded = Math.round(parsed)
+    if (rounded < minVocabularySize || rounded > maxVocabularySize) return null
+    return rounded
   } catch {
     return null
   }
@@ -805,7 +823,12 @@ export function useReader(
 
   const fetchParagraphDefinition = async (text: string) => {
     const modelConfig = readModelConfigFromStorage()
-    const payload = modelConfig ? { text, ...modelConfig } : { text }
+    const vocabularySize = readVocabularySizeFromStorage()
+    const payload = {
+      text,
+      ...(modelConfig || {}),
+      ...(vocabularySize ? { vocabularySize } : {})
+    }
     const response = await fetch('/api/querySentenceDefination', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
