@@ -1,12 +1,5 @@
 <template>
   <div class="user-page">
-    <header class="page-header">
-      <button class="icon-btn" type="button" aria-label="返回首页" @click="goHome">
-        <i class="fa-solid fa-chevron-left" aria-hidden="true"></i>
-      </button>
-      <h1 class="page-title">个人中心</h1>
-      <span class="header-spacer" aria-hidden="true"></span>
-    </header>
 
     <section class="card">
       <div class="card-header">
