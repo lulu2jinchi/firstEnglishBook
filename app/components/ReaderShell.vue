@@ -166,6 +166,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { useHead } from "#imports";
 import { useRoute } from "vue-router";
 import Dexie, { type Table } from "dexie";
 import { useReader } from "~/composables/useReader";
@@ -454,6 +455,7 @@ const lineHeight = ref(
 
 const activeTheme = computed(() => getThemeById(activeThemeId.value));
 const activeFont = computed(() => getFontById(activeFontId.value));
+const statusBarColor = computed(() => activeTheme.value.background);
 
 const themeVars = computed(() => ({
   "--reader-bg": activeTheme.value.background,
@@ -461,6 +463,13 @@ const themeVars = computed(() => ({
   "--reader-panel": activeTheme.value.panel,
   "--reader-border": activeTheme.value.border,
   "--reader-muted": activeTheme.value.muted,
+}));
+
+useHead(() => ({
+  meta: [
+    { name: "theme-color", content: statusBarColor.value },
+    { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
+  ],
 }));
 
 const panelLabel = computed(() => {
