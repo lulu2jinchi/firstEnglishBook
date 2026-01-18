@@ -446,6 +446,24 @@ export function useReader(
       let lastPayloadKey = ''
 
       const scrollContainer: HTMLElement | null = win.frameElement?.closest('.epub-container') || null
+      const wheelFallbackCooldownMs = 450
+      let lastWheelFallbackAt = 0
+
+      const handleWheelFallback = (event: WheelEvent) => {
+        if (readingMode.value !== 'scrolled-continuous') return
+        if (!scrollContainer) return
+        if (scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) return
+        if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+        const now = Date.now()
+        if (now - lastWheelFallbackAt < wheelFallbackCooldownMs) return
+        lastWheelFallbackAt = now
+        event.preventDefault()
+        if (event.deltaY > 0) {
+          rendition?.next()
+        } else if (event.deltaY < 0) {
+          rendition?.prev()
+        }
+      }
 
       const getViewportData = () => {
         if (!scrollContainer) {
@@ -539,6 +557,7 @@ export function useReader(
       scrollContainer?.addEventListener('scroll', handleScrollOrResize, { passive: true })
       // 视口尺寸变化同样影响可见性
       scrollContainer?.addEventListener('resize', handleScrollOrResize as any)
+      doc.addEventListener('wheel', handleWheelFallback, { passive: false })
 
       // 初始发送一次，确保父页面拿到首屏段落
       handleScrollOrResize()
@@ -549,6 +568,7 @@ export function useReader(
         scrollContainer?.removeEventListener('scroll', handleScrollOrResize)
         scrollContainer?.removeEventListener('resize', handleScrollOrResize as any)
         doc.removeEventListener('dblclick', handleDblClick)
+        doc.removeEventListener('wheel', handleWheelFallback)
         if (debounceTimer) {
           clearTimeout(debounceTimer)
           debounceTimer = null
