@@ -241,19 +241,61 @@ export function useReader(
     }
   }
 
+  const extractApiErrorReason = (body?: string) => {
+    if (!body) return ''
+    const trimmed = body.trim()
+    if (!trimmed) return ''
+    if (trimmed.startsWith('<')) return ''
+    try {
+      const parsed = JSON.parse(trimmed) as
+        | {
+            statusMessage?: string
+            message?: string
+            error?: string
+            detail?: string
+            reason?: string
+          }
+        | string
+      if (typeof parsed === 'string') return parsed
+      if (parsed && typeof parsed === 'object') {
+        return (
+          parsed.statusMessage ||
+          parsed.message ||
+          parsed.error ||
+          parsed.detail ||
+          parsed.reason ||
+          ''
+        )
+      }
+      return ''
+    } catch {
+      return trimmed
+    }
+  }
+
+  const sanitizeReason = (reason: string) => {
+    const cleaned = reason.replace(/\s+/g, ' ').trim()
+    if (!cleaned) return ''
+    return cleaned.slice(0, 200)
+  }
+
   const buildApiErrorMessage = (status?: number, body?: string) => {
+    const reason = sanitizeReason(extractApiErrorReason(body))
     if (isRateLimitError(status, body)) {
       const remainingMs = Math.max(0, nextAllowedAt - Date.now())
       const seconds = Math.ceil(remainingMs / 1000)
-      return seconds > 0
-        ? `接口请求过于频繁，已暂停 ${seconds} 秒`
-        : '接口请求过于频繁，请稍后再试'
+      const base =
+        seconds > 0 ? `接口请求过于频繁，已暂停 ${seconds} 秒` : '接口请求过于频繁，请稍后再试'
+      return reason ? `${base}：${reason}` : base
     }
     if (status === 401 || status === 403) {
-      return '接口鉴权失败，请检查模型配置'
+      return reason ? `接口鉴权失败：${reason}` : '接口鉴权失败，请检查模型配置'
     }
     if (status === 400) {
-      return '接口参数错误，请检查当前配置'
+      return reason ? `接口参数错误：${reason}` : '接口参数错误，请检查当前配置'
+    }
+    if (reason) {
+      return `接口请求失败：${reason}`
     }
     if (typeof status === 'number') {
       if (status >= 500) {
