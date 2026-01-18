@@ -1,5 +1,8 @@
 <template>
   <div class="reader-shell">
+    <div v-if="apiErrorVisible" class="api-error-toast" role="status" aria-live="polite">
+      {{ apiErrorMessage }}
+    </div>
 
     <main class="reader-body">
       <button
@@ -127,6 +130,8 @@ const {
   isLoading,
   currentLocation,
   progressText,
+  apiErrorMessage,
+  apiErrorVisible,
   isPaginated,
   modeButtonText,
   toggleMode,
@@ -149,6 +154,22 @@ const {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+}
+
+.api-error-toast {
+  position: fixed;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  max-width: min(90vw, 520px);
+  padding: 10px 16px;
+  border-radius: 999px;
+  background: rgba(239, 68, 68, 0.92);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.35);
 }
 
 .reader-header {

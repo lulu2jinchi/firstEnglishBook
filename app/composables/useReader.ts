@@ -170,6 +170,9 @@ export function useReader(
   let queueRunning = false
   let nextAllowedAt = 0
   let backoffMs = 0
+  const apiErrorMessage = ref('')
+  const apiErrorVisible = ref(false)
+  let apiErrorTimer: ReturnType<typeof setTimeout> | null = null
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -195,6 +198,51 @@ export function useReader(
 
   const resetBackoff = () => {
     backoffMs = 0
+  }
+
+  const clearApiError = () => {
+    apiErrorVisible.value = false
+    if (apiErrorTimer && typeof window !== 'undefined') {
+      window.clearTimeout(apiErrorTimer)
+    }
+    apiErrorTimer = null
+  }
+
+  const showApiError = (message: string) => {
+    apiErrorMessage.value = message
+    apiErrorVisible.value = true
+    if (apiErrorTimer && typeof window !== 'undefined') {
+      window.clearTimeout(apiErrorTimer)
+      apiErrorTimer = null
+    }
+    if (typeof window !== 'undefined') {
+      apiErrorTimer = window.setTimeout(() => {
+        apiErrorVisible.value = false
+      }, 5000)
+    }
+  }
+
+  const buildApiErrorMessage = (status?: number, body?: string) => {
+    if (isRateLimitError(status, body)) {
+      const remainingMs = Math.max(0, nextAllowedAt - Date.now())
+      const seconds = Math.ceil(remainingMs / 1000)
+      return seconds > 0
+        ? `接口请求过于频繁，已暂停 ${seconds} 秒`
+        : '接口请求过于频繁，请稍后再试'
+    }
+    if (status === 401 || status === 403) {
+      return '接口鉴权失败，请检查模型配置'
+    }
+    if (status === 400) {
+      return '接口参数错误，请检查当前配置'
+    }
+    if (typeof status === 'number') {
+      if (status >= 500) {
+        return '接口服务异常，请稍后重试'
+      }
+      return `接口请求失败（${status}），请稍后重试`
+    }
+    return '接口连接失败，请检查网络或服务地址'
   }
 
   const runDefinitionQueue = async () => {
@@ -250,6 +298,7 @@ export function useReader(
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
     }
+    clearApiError()
     removeTooltipPageLeaveHandlers()
     hideTooltip()
     const topDoc = getTopWindow()?.document
@@ -900,6 +949,7 @@ export function useReader(
         try {
           const resp = await fetchParagraphDefinition(paragraphText)
           resetBackoff()
+          clearApiError()
           if (!resp?.sentence || !resp?.meaning) {
             return
           }
@@ -929,6 +979,10 @@ export function useReader(
         }
       })
     } catch (error) {
+      // eslint-disable-next-line no-console
+      const status = (error as Error & { status?: number }).status
+      const body = (error as Error & { body?: string }).body
+      showApiError(buildApiErrorMessage(status, body))
       // eslint-disable-next-line no-console
       console.warn('段落释义请求失败', error)
     } finally {
@@ -999,6 +1053,8 @@ export function useReader(
     isLoading,
     currentLocation,
     progressText,
+    apiErrorMessage,
+    apiErrorVisible,
     isPaginated,
     modeButtonText,
     toggleMode,
