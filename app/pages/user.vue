@@ -38,15 +38,10 @@
             :step="inputStep"
           />
         </label>
-        <button class="ghost-btn" type="button" @click="resetToSuggested">
-          恢复建议
-        </button>
+       
       </div>
 
-      <div class="level-hint">
-        <p>提示词描述：{{ levelTextPreview }}</p>
-        <p v-if="currentLevelText">当前提示词：{{ currentLevelText }}</p>
-      </div>
+      
     </section>
 
     <section class="card">
