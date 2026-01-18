@@ -97,20 +97,12 @@
         <button class="ghost-btn" type="button" @click="toggleApiKey">
           {{ showApiKey ? '隐藏密钥' : '显示密钥' }}
         </button>
-        <button
-          class="save-btn save-btn--inline"
-          type="button"
-          :disabled="isModelSaving"
-          @click="saveModelConfig"
-        >
-          {{ isModelSaving ? '保存中...' : '保存模型配置' }}
-        </button>
       </div>
       <p v-if="modelStatus" class="save-status">{{ modelStatus }}</p>
     </section>
 
-    <button class="save-btn" type="button" :disabled="isSaving" @click="saveLevel">
-      {{ isSaving ? '保存中...' : '保存设置' }}
+    <button class="save-btn" type="button" :disabled="isAnySaving" @click="saveAll">
+      {{ isAnySaving ? '保存中...' : '保存设置' }}
     </button>
     <p v-if="saveStatus" class="save-status">{{ saveStatus }}</p>
   </div>
@@ -151,6 +143,7 @@ const apiKeyInputType = computed(() => (showApiKey.value ? 'text' : 'password'))
 const hasModelConfig = computed(
   () => Boolean(modelBaseUrl.value && modelApiKey.value && modelName.value)
 )
+const isAnySaving = computed(() => isSaving.value || isModelSaving.value)
 
 const clampVocabularySize = (value: number) => {
   if (!Number.isFinite(value)) return fallbackVocabularySize
@@ -278,6 +271,11 @@ const saveModelConfig = async () => {
   } finally {
     isModelSaving.value = false
   }
+}
+
+const saveAll = async () => {
+  await saveLevel()
+  await saveModelConfig()
 }
 
 const toggleApiKey = () => {
@@ -507,14 +505,6 @@ useHead({
 .save-btn:disabled {
   opacity: 0.6;
   cursor: default;
-}
-
-.save-btn--inline {
-  width: auto;
-  height: 36px;
-  border-radius: 12px;
-  padding: 0 16px;
-  font-size: 13px;
 }
 
 .save-status {
