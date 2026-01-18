@@ -759,23 +759,28 @@ applyLineHeight(lineHeight.value, false);
 
 .topbar-actions {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   pointer-events: auto;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-panel, #ffffff) 85%, transparent);
+  border: 1px solid color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
+  backdrop-filter: blur(10px) saturate(140%);
 }
 
 .topbar-button {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  border: 1px solid var(--reader-border, rgba(203, 167, 71, 0.4));
-  background: var(--reader-panel, rgba(255, 248, 220, 0.92));
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
   color: var(--reader-text, #1f2937);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease,
+    transform 0.12s ease;
 }
 
 .topbar-button svg {
@@ -785,13 +790,13 @@ applyLineHeight(lineHeight.value, false);
 }
 
 .topbar-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.18);
+  background: color-mix(in srgb, var(--reader-bg, #fff8dc) 60%, transparent);
+  border-color: color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
 }
 
 .topbar-text {
   font-weight: 700;
-  font-size: 15px;
+  font-size: 14px;
   letter-spacing: 0.02em;
 }
 
