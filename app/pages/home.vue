@@ -37,18 +37,7 @@
       </div>
     </div>
 
-    <nav class="tab-bar" aria-label="底部导航">
-      <button class="tab tab--active" type="button" aria-label="首页">
-        <i class="fa-solid fa-house tab-icon" aria-hidden="true"></i>
-      </button>
-      <button class="tab add-btn" type="button" aria-label="添加" :disabled="isUploading" @click="triggerUpload">
-        <i class="fa-solid fa-plus tab-icon" aria-hidden="true"></i>
-      </button>
-      <button class="tab" type="button" aria-label="个人中心" @click="goUser">
-        <i class="fa-regular fa-user tab-icon" aria-hidden="true"></i>
-      </button>
-      <div class="home-indicator" aria-hidden="true" />
-    </nav>
+    <BottomTabBar active="home" @home="goHome" @add="triggerUpload" @user="goUser" />
   </div>
 </template>
 
@@ -57,6 +46,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useHead } from '#imports'
 import Dexie, { type Table } from 'dexie'
+import BottomTabBar from '~/components/BottomTabBar.vue'
 
 const imgRightSide =
   "https://www.figma.com/api/mcp/asset/c06005b8-a781-41f5-aab5-5c7c1590b92f";
@@ -162,6 +152,10 @@ const handleBookClick = (book: BookItem) => {
 
 const goUser = () => {
   router.push('/user')
+}
+
+const goHome = () => {
+  router.push('/home')
 }
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
@@ -517,67 +511,6 @@ useHead({
   font-weight: 600;
 }
 
-.tab-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 78px;
-  padding: 10px 24px calc(16px + env(safe-area-inset-bottom, 0px));
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 -0.5px 0 rgba(0, 0, 0, 0.1);
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  align-items: start;
-  justify-items: center;
-  box-sizing: border-box;
-  z-index: 10;
-}
-
-.tab {
-  border: none;
-  background: transparent;
-  padding: 12px 20px 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.tab-icon {
-  font-size: 22px;
-  color: #1d1b20;
-}
-
-.tab--active {
-  color: #1d1b20;
-}
-
-.add-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  margin-top: -10px;
-  background: #ffffff;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-.add-btn .tab-icon {
-  font-size: 26px;
-}
-
-.home-indicator {
-  position: absolute;
-  bottom: calc(6px + env(safe-area-inset-bottom, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  width: 134px;
-  height: 5px;
-  background: #000000;
-  border-radius: 100px;
-}
 
 @media (min-width: 768px) {
   .home-page {

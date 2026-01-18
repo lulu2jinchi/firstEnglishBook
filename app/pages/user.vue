@@ -100,6 +100,8 @@
       {{ isAnySaving ? '保存中...' : '保存设置' }}
     </button>
     <p v-if="saveStatus" class="save-status">{{ saveStatus }}</p>
+
+    <BottomTabBar active="user" @home="goHome" @add="goHome" @user="goUser" />
   </div>
 </template>
 
@@ -107,6 +109,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useHead } from '#imports'
 import { useRouter } from 'vue-router'
+import BottomTabBar from '~/components/BottomTabBar.vue'
 
 const router = useRouter()
 const minVocabularySize = 1000
@@ -281,6 +284,10 @@ const goHome = () => {
   router.push('/home')
 }
 
+const goUser = () => {
+  router.push('/user')
+}
+
 onMounted(() => {
   void loadLevel()
   void loadModelConfig()
@@ -306,7 +313,7 @@ useHead({
 .user-page {
   min-height: 100dvh;
   box-sizing: border-box;
-  padding: 16px 20px 32px;
+  padding: 16px 20px calc(120px + env(safe-area-inset-bottom, 0px));
   max-width: 520px;
   margin: 0 auto;
   display: flex;
@@ -508,4 +515,5 @@ useHead({
   color: #6f6f6f;
   text-align: center;
 }
+
 </style>

@@ -9,6 +9,7 @@ Always use Chinese to response.
 - app/pages/user.vue：个人中心页面，设置词汇量（浏览器本地）与模型配置。
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
 - app/components/ReaderShell.vue：页面 UI、样式与基础布局。
+- app/components/BottomTabBar.vue：主页/个人中心共用底部导航。
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件）。
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
