@@ -1,8 +1,40 @@
 <template>
-  <div class="reader-shell">
+  <div class="reader-shell" :style="themeVars">
     <div v-if="apiErrorVisible" class="api-error-toast" role="status" aria-live="polite">
       {{ apiErrorMessage }}
     </div>
+
+    <header class="reader-topbar" aria-label="阅读器工具栏">
+      <div class="topbar-actions">
+        <button class="topbar-button" type="button" aria-label="目录" @click="togglePanel('outline')">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="5" width="3" height="3" rx="1" />
+            <rect x="4" y="10.5" width="3" height="3" rx="1" />
+            <rect x="4" y="16" width="3" height="3" rx="1" />
+            <rect x="9.5" y="5.5" width="10.5" height="2" rx="1" />
+            <rect x="9.5" y="11" width="10.5" height="2" rx="1" />
+            <rect x="9.5" y="16.5" width="10.5" height="2" rx="1" />
+          </svg>
+        </button>
+        <button class="topbar-button" type="button" aria-label="配色" @click="togglePanel('theme')">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M12 3a9 9 0 1 0 9 9h-9V3z"
+              fill="currentColor"
+            />
+            <path
+              d="M12 3v9h9"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            />
+          </svg>
+        </button>
+        <button class="topbar-button" type="button" aria-label="排版" @click="togglePanel('type')">
+          <span class="topbar-text">Aa</span>
+        </button>
+      </div>
+    </header>
 
     <main class="reader-body">
       <button
@@ -25,6 +57,105 @@
         ›
       </button>
     </main>
+
+    <div v-if="activePanel" class="panel-overlay" role="presentation" @click="closePanel">
+      <section
+        class="panel-sheet"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="panelLabel"
+        @click.stop
+      >
+        <div class="panel-handle" />
+        <div v-if="activePanel === 'outline'" class="panel-content">
+          <h3>目录</h3>
+          <div v-if="flatToc.length === 0" class="panel-empty">暂无目录</div>
+          <button
+            v-for="item in flatToc"
+            :key="item.key"
+            type="button"
+            class="toc-item"
+            :style="{ paddingLeft: `${12 + item.depth * 14}px` }"
+            @click="handleTocSelect(item)"
+          >
+            <span class="toc-title">{{ item.label }}</span>
+          </button>
+        </div>
+
+        <div v-else-if="activePanel === 'theme'" class="panel-content">
+          <h3>阅读配色</h3>
+          <div class="theme-grid">
+            <button
+              v-for="theme in themeOptions"
+              :key="theme.id"
+              type="button"
+              class="theme-card"
+              :class="{ active: theme.id === activeThemeId }"
+              :style="{
+                '--theme-bg': theme.background,
+                '--theme-text': theme.text
+              }"
+              @click="selectTheme(theme.id)"
+            >
+              <span class="theme-title">Aa</span>
+              <span class="theme-label">{{ theme.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-else class="panel-content">
+          <h3>字体与排版</h3>
+          <div
+            class="type-preview"
+            :style="{
+              fontFamily: activeFont.family,
+              fontSize: `${fontSize}px`,
+              lineHeight: `${lineHeight}`,
+              color: activeTheme.text,
+              background: activeTheme.panel
+            }"
+          >
+            The quick brown fox jumps over the lazy dog. Reading should be a pleasure.
+          </div>
+
+          <div class="type-section">
+            <div class="type-label">字体</div>
+            <div class="font-list">
+              <button
+                v-for="font in fontOptions"
+                :key="font.id"
+                type="button"
+                class="font-option"
+                :class="{ active: font.id === activeFontId }"
+                :style="{ fontFamily: font.family }"
+                @click="selectFont(font.id)"
+              >
+                <span>{{ font.label }}</span>
+                <span class="font-sample">Aa</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="type-section">
+            <div class="type-label">字号</div>
+            <div class="stepper">
+              <button type="button" @click="bumpFontSize(-1)">A-</button>
+              <span class="stepper-value">{{ fontSize }}px</span>
+              <button type="button" @click="bumpFontSize(1)">A+</button>
+            </div>
+          </div>
+
+          <div class="type-section">
+            <div class="type-label">行高</div>
+            <div class="stepper">
+              <button type="button" @click="bumpLineHeight(-0.1)">-</button>
+              <span class="stepper-value">{{ lineHeight.toFixed(1) }}x</span>
+              <button type="button" @click="bumpLineHeight(0.1)">+</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -134,10 +265,282 @@ const {
   apiErrorVisible,
   isPaginated,
   modeButtonText,
+  tocItems,
+  setReaderTheme,
+  setReaderFontFamily,
+  setReaderFontSize,
+  setReaderLineHeight,
   toggleMode,
   goPrev,
   goNext,
+  goToHref,
 } = useReader(viewerEl, computed(() => bookPath.value));
+
+type TocItem = {
+  label?: string;
+  href?: string;
+  subitems?: TocItem[];
+};
+
+type FlatTocItem = {
+  key: string;
+  label: string;
+  href?: string;
+  depth: number;
+};
+
+type ReaderTheme = {
+  id: string;
+  label: string;
+  background: string;
+  text: string;
+  panel: string;
+  border: string;
+  muted: string;
+};
+
+type ReaderFont = {
+  id: string;
+  label: string;
+  family: string;
+};
+
+const themeOptions: ReaderTheme[] = [
+  {
+    id: "original",
+    label: "Original",
+    background: "#fff8dc",
+    text: "#1f2937",
+    panel: "#ffffff",
+    border: "#e4d3a4",
+    muted: "#a8742f",
+  },
+  {
+    id: "paper",
+    label: "Paper",
+    background: "#f6f2e8",
+    text: "#1f2937",
+    panel: "#ffffff",
+    border: "#e6dcc5",
+    muted: "#8c7a5b",
+  },
+  {
+    id: "focus",
+    label: "Focus",
+    background: "#fbf5e9",
+    text: "#27272a",
+    panel: "#ffffff",
+    border: "#eadfc9",
+    muted: "#a08f7a",
+  },
+  {
+    id: "calm",
+    label: "Calm",
+    background: "#f1e6d2",
+    text: "#3a2f21",
+    panel: "#ffffff",
+    border: "#dbc7a9",
+    muted: "#9b7d52",
+  },
+  {
+    id: "sepia",
+    label: "Sepia",
+    background: "#f3e0c2",
+    text: "#3f2d20",
+    panel: "#ffffff",
+    border: "#d9bea0",
+    muted: "#a07245",
+  },
+  {
+    id: "quiet",
+    label: "Quiet",
+    background: "#2b2b2b",
+    text: "#f5f2e8",
+    panel: "#3a3a3a",
+    border: "#4b4b4b",
+    muted: "#b9afa3",
+  },
+];
+
+const fontOptions: ReaderFont[] = [
+  {
+    id: "classic",
+    label: "Georgia",
+    family: '"Georgia", "Times New Roman", serif',
+  },
+  {
+    id: "book",
+    label: "Palatino",
+    family: '"Palatino Linotype", "Book Antiqua", "Palatino", serif',
+  },
+  {
+    id: "modern",
+    label: "Avenir",
+    family: '"Avenir Next", "Helvetica Neue", Arial, sans-serif',
+  },
+];
+
+const activePanel = ref<null | "outline" | "theme" | "type">(null);
+
+const readerThemeStorageKey = "first-english-book-reader-theme";
+const readerFontStorageKey = "first-english-book-reader-font";
+const readerFontSizeStorageKey = "first-english-book-reader-font-size";
+const readerLineHeightStorageKey = "first-english-book-reader-line-height";
+const minFontSize = 14;
+const maxFontSize = 28;
+const minLineHeight = 1.2;
+const maxLineHeight = 2.2;
+
+const getStorageValue = (key: string) => {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(key);
+};
+
+const setStorageValue = (key: string, value: string) => {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(key, value);
+};
+
+const clampNumber = (value: number, min: number, max: number) => {
+  return Math.min(max, Math.max(min, value));
+};
+
+const getThemeById = (id: string) =>
+  themeOptions.find((theme) => theme.id === id) || themeOptions[0];
+
+const getFontById = (id: string) =>
+  fontOptions.find((font) => font.id === id) || fontOptions[0];
+
+const normalizeThemeId = (value: string | null) => {
+  if (value && themeOptions.some((theme) => theme.id === value)) {
+    return value;
+  }
+  return themeOptions[0].id;
+};
+
+const normalizeFontId = (value: string | null) => {
+  if (value && fontOptions.some((font) => font.id === value)) {
+    return value;
+  }
+  return fontOptions[0].id;
+};
+
+const activeThemeId = ref(normalizeThemeId(getStorageValue(readerThemeStorageKey)));
+const activeFontId = ref(normalizeFontId(getStorageValue(readerFontStorageKey)));
+const fontSize = ref(
+  clampNumber(
+    Number(getStorageValue(readerFontSizeStorageKey) || 20),
+    minFontSize,
+    maxFontSize
+  )
+);
+const lineHeight = ref(
+  clampNumber(
+    Number(getStorageValue(readerLineHeightStorageKey) || 1.6),
+    minLineHeight,
+    maxLineHeight
+  )
+);
+
+const activeTheme = computed(() => getThemeById(activeThemeId.value));
+const activeFont = computed(() => getFontById(activeFontId.value));
+
+const themeVars = computed(() => ({
+  "--reader-bg": activeTheme.value.background,
+  "--reader-text": activeTheme.value.text,
+  "--reader-panel": activeTheme.value.panel,
+  "--reader-border": activeTheme.value.border,
+  "--reader-muted": activeTheme.value.muted,
+}));
+
+const panelLabel = computed(() => {
+  if (activePanel.value === "outline") return "目录";
+  if (activePanel.value === "theme") return "阅读配色";
+  if (activePanel.value === "type") return "字体与排版";
+  return "";
+});
+
+const togglePanel = (panel: "outline" | "theme" | "type") => {
+  activePanel.value = activePanel.value === panel ? null : panel;
+};
+
+const closePanel = () => {
+  activePanel.value = null;
+};
+
+const selectTheme = (id: string, persist = true) => {
+  const theme = getThemeById(id);
+  activeThemeId.value = theme.id;
+  setReaderTheme({ background: theme.background, text: theme.text });
+  if (persist) {
+    setStorageValue(readerThemeStorageKey, theme.id);
+  }
+};
+
+const selectFont = (id: string, persist = true) => {
+  const font = getFontById(id);
+  activeFontId.value = font.id;
+  setReaderFontFamily(font.family);
+  if (persist) {
+    setStorageValue(readerFontStorageKey, font.id);
+  }
+};
+
+const applyFontSize = (value: number, persist = true) => {
+  const next = clampNumber(value, minFontSize, maxFontSize);
+  fontSize.value = next;
+  setReaderFontSize(next);
+  if (persist) {
+    setStorageValue(readerFontSizeStorageKey, String(next));
+  }
+};
+
+const applyLineHeight = (value: number, persist = true) => {
+  const next = Number(clampNumber(value, minLineHeight, maxLineHeight).toFixed(1));
+  lineHeight.value = next;
+  setReaderLineHeight(next);
+  if (persist) {
+    setStorageValue(readerLineHeightStorageKey, String(next));
+  }
+};
+
+const bumpFontSize = (delta: number) => {
+  applyFontSize(fontSize.value + delta);
+};
+
+const bumpLineHeight = (delta: number) => {
+  applyLineHeight(lineHeight.value + delta);
+};
+
+const flattenToc = (items: TocItem[], depth = 0, acc: FlatTocItem[] = []) => {
+  items.forEach((item, index) => {
+    const label = (item.label || "").trim() || "未命名章节";
+    acc.push({
+      key: `${item.href || label}-${depth}-${index}`,
+      label,
+      href: item.href,
+      depth,
+    });
+    if (item.subitems && item.subitems.length > 0) {
+      flattenToc(item.subitems, depth + 1, acc);
+    }
+  });
+  return acc;
+};
+
+const flatToc = computed(() => flattenToc(tocItems.value || []));
+
+const handleTocSelect = (item: FlatTocItem) => {
+  if (item.href) {
+    void goToHref(item.href);
+  }
+  closePanel();
+};
+
+selectTheme(activeThemeId.value, false);
+selectFont(activeFontId.value, false);
+applyFontSize(fontSize.value, false);
+applyLineHeight(lineHeight.value, false);
 </script>
 
 <style scoped>
@@ -154,6 +557,8 @@ const {
   height: 100dvh;
   display: flex;
   flex-direction: column;
+  background: var(--reader-bg, #fff8dc);
+  color: var(--reader-text, #1f2937);
 }
 
 .api-error-toast {
@@ -279,18 +684,8 @@ const {
   min-height: 70vh;
   display: flex;
   position: relative;
-  background: radial-gradient(
-      circle at 20% 20%,
-      rgba(255, 244, 189, 0.7),
-      transparent 38%
-    ),
-    radial-gradient(
-      circle at 80% 0%,
-      rgba(255, 235, 148, 0.75),
-      transparent 34%
-    ),
-    #fff8dc;
-  border: 1px solid rgba(203, 167, 71, 0.4);
+  background: var(--reader-bg, #fff8dc);
+  border: 1px solid var(--reader-border, rgba(203, 167, 71, 0.4));
   overflow: hidden;
 }
 
@@ -301,9 +696,10 @@ const {
   width: 42px;
   height: 64px;
   border-radius: 14px;
-  border: 1px solid rgba(203, 167, 71, 0.4);
-  background: rgba(255, 248, 220, 0.85);
-  color: #a66a09;
+  border: 1px solid var(--reader-border, rgba(203, 167, 71, 0.4));
+  background: var(--reader-panel, rgba(255, 248, 220, 0.85));
+  background: color-mix(in srgb, var(--reader-panel, #ffffff) 88%, transparent);
+  color: var(--reader-text, #a66a09);
   font-size: 32px;
   font-weight: 700;
   cursor: pointer;
@@ -317,8 +713,9 @@ const {
 
 .page-button:hover:not(:disabled) {
   transform: translateY(-50%) scale(1.03);
-  box-shadow: 0 10px 30px rgba(166, 106, 9, 0.25);
-  background: rgba(255, 248, 220, 0.95);
+  box-shadow: 0 10px 30px rgba(166, 106, 9, 0.2);
+  background: var(--reader-panel, rgba(255, 248, 220, 0.95));
+  background: color-mix(in srgb, var(--reader-panel, #ffffff) 96%, transparent);
 }
 
 .page-button:disabled {
@@ -346,7 +743,237 @@ const {
   height: 100%;
   border: none;
   display: block;
-  background: #fff8dc;
+  background: var(--reader-bg, #fff8dc);
+}
+
+.reader-topbar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: 16px;
+  left: 16px;
+  display: flex;
+  justify-content: flex-end;
+  z-index: 6;
+  pointer-events: none;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.topbar-button {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--reader-border, rgba(203, 167, 71, 0.4));
+  background: var(--reader-panel, rgba(255, 248, 220, 0.92));
+  color: var(--reader-text, #1f2937);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.topbar-button svg {
+  width: 20px;
+  height: 20px;
+  fill: currentColor;
+}
+
+.topbar-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 30px rgba(15, 23, 42, 0.18);
+}
+
+.topbar-text {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+
+.panel-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(4px);
+  z-index: 7;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.panel-sheet {
+  width: min(560px, 100%);
+  max-height: 80vh;
+  background: var(--reader-panel, #ffffff);
+  color: var(--reader-text, #1f2937);
+  border-radius: 22px 22px 0 0;
+  padding: 10px 18px 24px;
+  box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.18);
+  overflow: hidden;
+}
+
+.panel-handle {
+  width: 42px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--reader-muted, #b7791f);
+  background: color-mix(in srgb, var(--reader-muted, #b7791f) 60%, transparent);
+  margin: 6px auto 12px;
+}
+
+.panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: calc(80vh - 40px);
+  overflow: auto;
+  padding-bottom: 8px;
+}
+
+.panel-content h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.panel-empty {
+  padding: 18px;
+  border-radius: 12px;
+  border: 1px dashed var(--reader-border, #e5e7eb);
+  color: var(--reader-muted, #6b7280);
+  text-align: center;
+}
+
+.toc-item {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 12px;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.toc-item:hover {
+  background: rgba(0, 0, 0, 0.06);
+  background: color-mix(in srgb, var(--reader-bg, #fff8dc) 65%, transparent);
+}
+
+.toc-title {
+  display: block;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.theme-card {
+  border: 1px solid var(--reader-border, #e5e7eb);
+  border-radius: 14px;
+  padding: 14px;
+  background: var(--theme-bg);
+  color: var(--theme-text);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.theme-card.active {
+  outline:1px solid var(--reader-text, #1f2937);
+  outline-offset: -1px;
+}
+
+.theme-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.theme-label {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+.type-preview {
+  border-radius: 18px;
+  padding: 20px;
+  border: 1px solid var(--reader-border, #e5e7eb);
+  color: inherit;
+}
+
+.type-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.type-label {
+  font-size: 13px;
+  color: var(--reader-muted, #6b7280);
+}
+
+.font-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.font-option {
+  border: 1px solid var(--reader-border, #e5e7eb);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: transparent;
+  color: inherit;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+}
+
+.font-option.active {
+  background: rgba(0, 0, 0, 0.06);
+  background: color-mix(in srgb, var(--reader-bg, #fff8dc) 80%, transparent);
+  border-color: var(--reader-text, #1f2937);
+}
+
+.font-sample {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--reader-border, #e5e7eb);
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.stepper button {
+  border: none;
+  background: transparent;
+  font-weight: 700;
+  font-size: 15px;
+  color: inherit;
+  cursor: pointer;
+}
+
+.stepper-value {
+  font-weight: 600;
+  font-size: 14px;
 }
 
 @media (max-width: 720px) {

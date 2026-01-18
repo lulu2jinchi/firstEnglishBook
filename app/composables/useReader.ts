@@ -4,6 +4,17 @@ import Dexie, { type Table } from 'dexie'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
+type ReaderThemeConfig = {
+  background: string
+  text: string
+}
+
+type TocItem = {
+  label?: string
+  href?: string
+  subitems?: TocItem[]
+}
+
 type SentenceDefinitionResponse = {
   sentence?: string
   meaning?: Record<string, string>
@@ -173,6 +184,14 @@ export function useReader(
   const apiErrorMessage = ref('')
   const apiErrorVisible = ref(false)
   let apiErrorTimer: ReturnType<typeof setTimeout> | null = null
+  const tocItems = ref<TocItem[]>([])
+  const readerTheme = ref<ReaderThemeConfig>({
+    background: '#fff8dc',
+    text: '#1f2937'
+  })
+  const readerFontFamily = ref('"Georgia", "Times New Roman", serif')
+  const readerFontSize = ref(20)
+  const readerLineHeight = ref(1.6)
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -335,6 +354,15 @@ export function useReader(
       bookPath.value && isEpubBlobUrl(bookPath.value) ? { openAs: 'epub' } : undefined
     book = ePub(encodedBookPath.value, openOptions)
     await book.ready
+    tocItems.value = []
+    try {
+      const navigation = await book.loaded.navigation
+      tocItems.value = navigation?.toc || []
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('读取目录失败', error)
+      tocItems.value = []
+    }
     const savedCfi = await loadSavedLocation(bookKey.value)
     await buildRendition(readingMode.value, savedCfi)
     await book.locations.generate(1600)
@@ -362,6 +390,16 @@ export function useReader(
 
   const goNext = () => {
     rendition?.next()
+  }
+
+  const goToHref = async (href: string) => {
+    if (!rendition || !href) return
+    try {
+      await rendition.display(href)
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('跳转目录失败', error)
+    }
   }
 
   function updateProgress(location: any) {
@@ -418,11 +456,48 @@ export function useReader(
   }
 
   function applyTheme() {
-    // 设置阅读背景为浅黄色，提升纸质阅读感。
+    if (!rendition) return
+    const theme = readerTheme.value
+    const fontFamily = readerFontFamily.value
+    const fontSize = `${readerFontSize.value}px`
+    const lineHeight = `${readerLineHeight.value}`
     rendition.themes.default({
-      html: { background: '#fff8dc' },
-      body: { background: '#fff8dc', color: '#1f2937' }
+      html: { background: theme.background, color: theme.text },
+      body: {
+        background: theme.background,
+        color: theme.text,
+        'font-family': fontFamily,
+        'font-size': fontSize,
+        'line-height': lineHeight
+      }
     })
+    const overrideCss = [
+      `body, body * { font-family: ${fontFamily} !important; }`,
+      `body, body * { font-size: ${fontSize} !important; }`,
+      `body, body * { line-height: ${lineHeight} !important; }`
+    ].join('\n')
+    rendition.themes.registerCss('reader-overrides', overrideCss)
+    rendition.themes.select('reader-overrides')
+  }
+
+  const setReaderTheme = (theme: ReaderThemeConfig) => {
+    readerTheme.value = theme
+    applyTheme()
+  }
+
+  const setReaderFontFamily = (fontFamily: string) => {
+    readerFontFamily.value = fontFamily
+    applyTheme()
+  }
+
+  const setReaderFontSize = (fontSize: number) => {
+    readerFontSize.value = fontSize
+    applyTheme()
+  }
+
+  const setReaderLineHeight = (lineHeight: number) => {
+    readerLineHeight.value = lineHeight
+    applyTheme()
   }
 
   /**
@@ -1057,8 +1132,17 @@ export function useReader(
     apiErrorVisible,
     isPaginated,
     modeButtonText,
+    tocItems,
+    setReaderTheme,
+    setReaderFontFamily,
+    setReaderFontSize,
+    setReaderLineHeight,
+    readerFontFamily,
+    readerFontSize,
+    readerLineHeight,
     toggleMode,
     goPrev,
-    goNext
+    goNext,
+    goToHref
   }
 }
