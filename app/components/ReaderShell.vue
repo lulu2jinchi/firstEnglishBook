@@ -60,14 +60,19 @@
 
     <div v-if="activePanel" class="panel-overlay" role="presentation" @click="closePanel">
       <section
+        ref="panelSheetEl"
         class="panel-sheet"
         role="dialog"
         aria-modal="true"
         :aria-label="panelLabel"
         @click.stop
+        @touchstart="handlePanelTouchStart"
+        @touchmove="handlePanelTouchMove"
+        @touchend="handlePanelTouchEnd"
+        @touchcancel="handlePanelTouchEnd"
       >
         <div class="panel-handle" />
-        <div v-if="activePanel === 'outline'" class="panel-content">
+        <div v-if="activePanel === 'outline'" ref="panelContentEl" class="panel-content">
           <h3>目录</h3>
           <div v-if="flatToc.length === 0" class="panel-empty">暂无目录</div>
           <button
@@ -82,7 +87,7 @@
           </button>
         </div>
 
-        <div v-else-if="activePanel === 'theme'" class="panel-content">
+        <div v-else-if="activePanel === 'theme'" ref="panelContentEl" class="panel-content">
           <h3>阅读配色</h3>
           <div class="theme-grid">
             <button
@@ -103,7 +108,7 @@
           </div>
         </div>
 
-        <div v-else class="panel-content">
+        <div v-else ref="panelContentEl" class="panel-content">
           <h3>字体与排版</h3>
           <div
             class="type-preview"
@@ -160,7 +165,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import Dexie, { type Table } from "dexie";
 import { useReader } from "~/composables/useReader";
@@ -381,6 +386,11 @@ const fontOptions: ReaderFont[] = [
 ];
 
 const activePanel = ref<null | "outline" | "theme" | "type">(null);
+const panelSheetEl = ref<HTMLElement | null>(null);
+const panelContentEl = ref<HTMLElement | null>(null);
+const isPanelDragging = ref(false);
+const panelDragStartY = ref(0);
+const panelDragOffset = ref(0);
 
 const readerThemeStorageKey = "first-english-book-reader-theme";
 const readerFontStorageKey = "first-english-book-reader-font";
@@ -466,6 +476,7 @@ const togglePanel = (panel: "outline" | "theme" | "type") => {
 
 const closePanel = () => {
   activePanel.value = null;
+  resetPanelTransform();
 };
 
 const selectTheme = (id: string, persist = true) => {
@@ -537,6 +548,61 @@ const handleTocSelect = (item: FlatTocItem) => {
   closePanel();
 };
 
+const resetPanelTransform = () => {
+  if (!panelSheetEl.value) return;
+  panelSheetEl.value.style.transition = "";
+  panelSheetEl.value.style.transform = "";
+};
+
+const handlePanelTouchStart = (event: TouchEvent) => {
+  if (!panelSheetEl.value || event.touches.length !== 1) return;
+  const target = event.target as HTMLElement | null;
+  const startedOnHandle = Boolean(target?.closest(".panel-handle"));
+  const scrollTop = panelContentEl.value?.scrollTop ?? 0;
+  if (!startedOnHandle && scrollTop > 0) return;
+  isPanelDragging.value = true;
+  panelDragStartY.value = event.touches[0].clientY;
+  panelDragOffset.value = 0;
+  panelSheetEl.value.style.transition = "none";
+};
+
+const handlePanelTouchMove = (event: TouchEvent) => {
+  if (!isPanelDragging.value || !panelSheetEl.value || event.touches.length !== 1) return;
+  const currentY = event.touches[0].clientY;
+  const delta = Math.max(0, currentY - panelDragStartY.value);
+  if (delta <= 0) return;
+  panelDragOffset.value = delta;
+  panelSheetEl.value.style.transform = `translateY(${delta}px)`;
+  event.preventDefault();
+};
+
+const handlePanelTouchEnd = () => {
+  if (!isPanelDragging.value || !panelSheetEl.value) return;
+  const shouldClose = panelDragOffset.value > 120;
+  panelSheetEl.value.style.transition = "transform 0.18s ease";
+  if (shouldClose) {
+    panelSheetEl.value.style.transform = "translateY(100%)";
+    window.setTimeout(() => {
+      activePanel.value = null;
+      resetPanelTransform();
+    }, 180);
+  } else {
+    panelSheetEl.value.style.transform = "translateY(0)";
+  }
+  isPanelDragging.value = false;
+  panelDragOffset.value = 0;
+};
+
+watch(
+  () => activePanel.value,
+  (value) => {
+    if (!value) return;
+    void nextTick(() => {
+      resetPanelTransform();
+    });
+  }
+);
+
 selectTheme(activeThemeId.value, false);
 selectFont(activeFontId.value, false);
 applyFontSize(fontSize.value, false);
@@ -550,6 +616,7 @@ applyLineHeight(lineHeight.value, false);
     sans-serif;
   background: #0f172a;
   color: #e2e8f0;
+  overscroll-behavior: none;
 }
 
 .reader-shell {
@@ -809,6 +876,7 @@ applyLineHeight(lineHeight.value, false);
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  overscroll-behavior: contain;
 }
 
 .panel-sheet {
@@ -820,6 +888,7 @@ applyLineHeight(lineHeight.value, false);
   padding: 10px 18px 24px;
   box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.18);
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .panel-handle {
@@ -838,6 +907,8 @@ applyLineHeight(lineHeight.value, false);
   max-height: calc(80vh - 40px);
   overflow: auto;
   padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .panel-content h3 {
