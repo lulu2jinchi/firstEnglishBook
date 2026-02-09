@@ -49,6 +49,20 @@ type PreprocessedParagraph = {
   threshold: number
 }
 
+type DefinitionCandidate = {
+  paragraphId: string
+  paragraphText: string
+  sourceDoc: Document
+  cacheKey: string
+  bookKey: string
+  preprocessed: PreprocessedParagraph
+}
+
+type DefinitionBatchResult = {
+  candidate: DefinitionCandidate
+  response: SentenceDefinitionResponse
+}
+
 type SentenceMarker = {
   rawWord: string
   meaningKey: string
@@ -508,7 +522,11 @@ export function useReader(
   let tooltipVisibilityHandler: (() => void) | null = null
   let tooltipTopScrollHandler: (() => void) | null = null
   const definitionQueue: Array<() => Promise<void>> = []
-  const requestIntervalMs = 2000
+  const shortParagraphMaxChars = 120
+  const shortBatchMaxItems = 3
+  const batchRetryMaxAttempts = 3
+  const requestIntervalMs = 1000
+  const batchParagraphSeparator = '\n\n<<<__PARA_SPLIT__>>>\n\n'
   const maxBackoffMs = 120000
   let queueRunning = false
   let nextAllowedAt = 0
@@ -936,7 +954,7 @@ export function useReader(
         if (!paragraphEl) return
         const payload = getParagraphPayload(paragraphEl)
         if (!payload) return
-        void handleParagraphDefinition(payload, doc)
+        void handleVisibleParagraphs([payload], doc)
       }
 
       doc.addEventListener('dblclick', handleDblClick)
@@ -1503,23 +1521,12 @@ export function useReader(
     return false
   }
 
-  const fetchParagraphDefinition = async (text: string) => {
-    const vocabularySize = readVocabularySizeFromStorage()
-    const preprocessed = await preprocessParagraphForDefinition(text, vocabularySize)
-
-    if (preprocessed.targetWords.length === 0) {
-      return {
-        sentence: text,
-        meaning: {}
-      } satisfies SentenceDefinitionResponse
-    }
-
-    const payload = {
-      text,
-      annotatedText: preprocessed.annotatedText,
-      targetWords: preprocessed.targetWords,
-      vocabularySize: preprocessed.threshold
-    }
+  const requestSentenceDefinition = async (payload: {
+    text: string
+    annotatedText: string
+    targetWords: string[]
+    vocabularySize: number
+  }) => {
     const response = await fetch('/api/querySentenceDefination', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1542,80 +1549,198 @@ export function useReader(
     return (await response.json()) as SentenceDefinitionResponse
   }
 
-  const handleParagraphDefinition = async (paragraph: any, sourceDoc: Document) => {
-    const paragraphId = paragraph?.id
-    const paragraphText = paragraph?.text
-    if (!paragraphId || !paragraphText) return
-
-    const db = ensureReaderDefinitionDb()
-    const currentBookKey = bookKey.value
-    const thresholdForCache = normalizeVocabularyThreshold(readVocabularySizeFromStorage())
-    const definitionConfigSignature = buildDefinitionConfigSignature(thresholdForCache)
-    const cacheKey = `${currentBookKey}:${paragraphId}:${definitionConfigSignature}`
-    if (db) {
-      try {
-        const cached = await db.definitions.get(cacheKey)
-        if (cached?.sentence && cached?.meaning) {
-          if (isLegacyTaggedSentence(cached.sentence)) {
-            await db.definitions.delete(cacheKey)
-          } else {
-            applyDefinitionToBestDoc(paragraphId, cached, sourceDoc)
-            return
-          }
-        }
-      } catch (error) {
-        // eslint-disable-next-line no-console
-        console.warn('读取 Dexie 缓存失败', error)
-      }
-    }
-
-    if (paragraphDefinitionStatus.has(paragraphId)) return
-    paragraphDefinitionStatus.add(paragraphId)
-
+  const writeDefinitionCache = async (
+    db: ReaderDefinitionDB | null,
+    candidate: DefinitionCandidate,
+    response: SentenceDefinitionResponse
+  ) => {
+    if (!db || !response.sentence || !response.meaning) return
     try {
-      await enqueueDefinitionTask(async () => {
-        try {
-          const resp = await fetchParagraphDefinition(paragraphText)
-          resetBackoff()
-          clearApiError()
-          if (!resp?.sentence || !resp?.meaning) {
-            return
-          }
-          if (db) {
-            try {
-              await db.definitions.put({
-                key: cacheKey,
-                bookKey: currentBookKey,
-                paragraphId,
-                sentence: resp.sentence,
-                meaning: resp.meaning,
-                updatedAt: Date.now()
-              })
-            } catch (error) {
-              // eslint-disable-next-line no-console
-              console.warn('写入 Dexie 缓存失败', error)
-            }
-          }
-          applyDefinitionToBestDoc(paragraphId, resp, sourceDoc)
-        } catch (error) {
-          const status = (error as Error & { status?: number }).status
-          const body = (error as Error & { body?: string }).body
-          if (isRateLimitError(status, body)) {
-            bumpBackoff(body || String(error))
-          }
-          throw error
-        }
+      await db.definitions.put({
+        key: candidate.cacheKey,
+        bookKey: candidate.bookKey,
+        paragraphId: candidate.paragraphId,
+        sentence: response.sentence,
+        meaning: response.meaning,
+        updatedAt: Date.now()
       })
     } catch (error) {
       // eslint-disable-next-line no-console
-      const status = (error as Error & { status?: number }).status
-      const body = (error as Error & { body?: string }).body
-      showApiError(buildApiErrorMessage(status, body))
-      // eslint-disable-next-line no-console
-      console.warn('段落释义请求失败', error)
-    } finally {
-      paragraphDefinitionStatus.delete(paragraphId)
+      console.warn('写入 Dexie 缓存失败', error)
     }
+  }
+
+  const buildDefinitionBatches = (candidates: DefinitionCandidate[]) => {
+    const batches: DefinitionCandidate[][] = []
+    let shortBuffer: DefinitionCandidate[] = []
+
+    const flushShortBuffer = () => {
+      if (shortBuffer.length === 0) return
+      batches.push(shortBuffer)
+      shortBuffer = []
+    }
+
+    for (const candidate of candidates) {
+      if (candidate.paragraphText.length <= shortParagraphMaxChars) {
+        shortBuffer.push(candidate)
+        if (shortBuffer.length >= shortBatchMaxItems) {
+          flushShortBuffer()
+        }
+        continue
+      }
+      flushShortBuffer()
+      batches.push([candidate])
+    }
+
+    flushShortBuffer()
+    return batches
+  }
+
+  const fetchBatchDefinitions = async (batch: DefinitionCandidate[]) => {
+    const mergedTargetWords: string[] = []
+    const seenWords = new Set<string>()
+
+    for (const candidate of batch) {
+      for (const word of candidate.preprocessed.targetWords) {
+        if (seenWords.has(word)) continue
+        seenWords.add(word)
+        mergedTargetWords.push(word)
+      }
+    }
+
+    const payload = {
+      text: batch.map((candidate) => candidate.paragraphText).join(batchParagraphSeparator),
+      annotatedText: batch.map((candidate) => candidate.preprocessed.annotatedText).join(batchParagraphSeparator),
+      targetWords: mergedTargetWords,
+      vocabularySize: batch[0]?.preprocessed.threshold ?? fallbackVocabularySize
+    }
+
+    const batchResponse = await requestSentenceDefinition(payload)
+    const normalizedMeaning = normalizeMeaningMap(batchResponse.meaning || {})
+    const results: DefinitionBatchResult[] = []
+
+    for (const candidate of batch) {
+      const meaning: Record<string, string> = {}
+      for (const word of candidate.preprocessed.targetWords) {
+        const value = normalizedMeaning[word]
+        if (!value) {
+          throw new Error(`批量结果缺少单词释义: ${word}`)
+        }
+        meaning[word] = value
+      }
+      results.push({
+        candidate,
+        response: {
+          sentence: candidate.preprocessed.annotatedText,
+          meaning
+        }
+      })
+    }
+
+    return results
+  }
+
+  const processDefinitionBatch = async (batch: DefinitionCandidate[], db: ReaderDefinitionDB | null) => {
+    let attempt = 0
+
+    while (attempt < batchRetryMaxAttempts) {
+      attempt += 1
+      try {
+        const results = await fetchBatchDefinitions(batch)
+        for (const result of results) {
+          await writeDefinitionCache(db, result.candidate, result.response)
+          applyDefinitionToBestDoc(result.candidate.paragraphId, result.response, result.candidate.sourceDoc)
+        }
+        resetBackoff()
+        clearApiError()
+        return
+      } catch (error) {
+        const status = (error as Error & { status?: number }).status
+        const body = (error as Error & { body?: string }).body
+        if (isRateLimitError(status, body)) {
+          bumpBackoff(body || String(error))
+        }
+        if (attempt >= batchRetryMaxAttempts) {
+          throw error
+        }
+      }
+    }
+  }
+
+  const prepareDefinitionCandidates = async (
+    paragraphs: any[],
+    fallbackDoc: Document | null | undefined,
+    db: ReaderDefinitionDB | null
+  ) => {
+    const candidates: DefinitionCandidate[] = []
+    const seenParagraphIds = new Set<string>()
+    const currentBookKey = bookKey.value
+    const thresholdForCache = normalizeVocabularyThreshold(readVocabularySizeFromStorage())
+    const definitionConfigSignature = buildDefinitionConfigSignature(thresholdForCache)
+
+    for (const paragraph of paragraphs) {
+      const paragraphId = paragraph?.id
+      const paragraphText = typeof paragraph?.text === 'string' ? paragraph.text.trim() : ''
+      if (!paragraphId || !paragraphText) continue
+      if (seenParagraphIds.has(paragraphId)) continue
+      seenParagraphIds.add(paragraphId)
+      if (paragraphDefinitionStatus.has(paragraphId)) continue
+
+      const targetDoc = paragraphDocumentMap.get(paragraphId) || fallbackDoc
+      if (!targetDoc) {
+        // eslint-disable-next-line no-console
+        console.warn('未找到段落对应的 iframe 文档', { paragraphId })
+        continue
+      }
+
+      const cacheKey = `${currentBookKey}:${paragraphId}:${definitionConfigSignature}`
+      if (db) {
+        try {
+          const cached = await db.definitions.get(cacheKey)
+          if (cached?.sentence && cached?.meaning) {
+            if (isLegacyTaggedSentence(cached.sentence)) {
+              await db.definitions.delete(cacheKey)
+            } else {
+              applyDefinitionToBestDoc(paragraphId, cached, targetDoc)
+              continue
+            }
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('读取 Dexie 缓存失败', error)
+        }
+      }
+
+      const preprocessed = await preprocessParagraphForDefinition(paragraphText, thresholdForCache)
+      if (preprocessed.targetWords.length === 0) {
+        const response = {
+          sentence: paragraphText,
+          meaning: {}
+        } satisfies SentenceDefinitionResponse
+        const noWordCandidate: DefinitionCandidate = {
+          paragraphId,
+          paragraphText,
+          sourceDoc: targetDoc,
+          cacheKey,
+          bookKey: currentBookKey,
+          preprocessed
+        }
+        await writeDefinitionCache(db, noWordCandidate, response)
+        applyDefinitionToBestDoc(paragraphId, response, targetDoc)
+        continue
+      }
+
+      candidates.push({
+        paragraphId,
+        paragraphText,
+        sourceDoc: targetDoc,
+        cacheKey,
+        bookKey: currentBookKey,
+        preprocessed
+      })
+    }
+
+    return candidates
   }
 
   const trackParagraphDocument = (paragraphId: string, doc: Document) => {
@@ -1642,15 +1767,28 @@ export function useReader(
 
   const handleVisibleParagraphs = async (paragraphs: any[], fallbackDoc?: Document | null) => {
     if (!Array.isArray(paragraphs)) return
-    for (const paragraph of paragraphs) {
-      const paragraphId = paragraph?.id
-      const targetDoc = paragraphId ? paragraphDocumentMap.get(paragraphId) || fallbackDoc : fallbackDoc
-      if (!targetDoc) {
+    const db = ensureReaderDefinitionDb()
+    const candidates = await prepareDefinitionCandidates(paragraphs, fallbackDoc, db)
+    if (candidates.length === 0) return
+
+    const batches = buildDefinitionBatches(candidates)
+    for (const batch of batches) {
+      const paragraphIds = batch.map((candidate) => candidate.paragraphId)
+      paragraphIds.forEach((paragraphId) => paragraphDefinitionStatus.add(paragraphId))
+
+      try {
+        await enqueueDefinitionTask(async () => {
+          await processDefinitionBatch(batch, db)
+        })
+      } catch (error) {
+        const status = (error as Error & { status?: number }).status
+        const body = (error as Error & { body?: string }).body
+        showApiError(buildApiErrorMessage(status, body))
         // eslint-disable-next-line no-console
-        console.warn('未找到段落对应的 iframe 文档', { paragraphId })
-        continue
+        console.warn('段落释义请求失败', error)
+      } finally {
+        paragraphIds.forEach((paragraphId) => paragraphDefinitionStatus.delete(paragraphId))
       }
-      await handleParagraphDefinition(paragraph, targetDoc)
     }
   }
 
