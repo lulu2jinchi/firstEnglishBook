@@ -17,13 +17,20 @@ type RequestBody =
   | {
       text?: string
       paragraph?: string
-      baseUrl?: string
-      apiKey?: string
-      model?: string
+      annotatedText?: string
+      targetWords?: string[]
       vocabularySize?: number | string
     }
   | string
   | null
+
+type SentenceDefinitionResponse = {
+  sentence: string
+  meaning: Record<string, string>
+}
+
+const annotatedTextPlaceholder = '{{ANNOTATED_TEXT}}'
+const targetWordsPlaceholder = '{{TARGET_WORDS}}'
 
 const tryParseJson = (text: string) => {
   try {
@@ -78,13 +85,49 @@ const normalizeText = (body: RequestBody): string => {
   return ''
 }
 
-const pickConfigValue = (value?: string, fallback?: string) => {
-  const trimmed = value?.trim() ?? ''
-  if (trimmed) return trimmed
-  return fallback?.trim() ?? ''
+const normalizeAnnotatedText = (body: RequestBody, fallbackText: string): string => {
+  if (body && typeof body === 'object' && typeof body.annotatedText === 'string') {
+    const trimmed = body.annotatedText.trim()
+    if (trimmed) return trimmed
+  }
+  return fallbackText
+}
+
+const normalizeWordKey = (word: string) =>
+  word
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/^[^a-z'-]+|[^a-z'-]+$/g, '')
+
+const normalizeTargetWords = (raw: unknown) => {
+  if (!Array.isArray(raw)) return []
+  const targetWords: string[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (typeof item !== 'string') continue
+    const normalized = normalizeWordKey(item)
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    targetWords.push(normalized)
+  }
+  return targetWords
+}
+
+const extractTargetWordsFromAnnotatedText = (text: string) => {
+  const targetWords: string[] = []
+  const seen = new Set<string>()
+  const matches = text.matchAll(/\[([^\]]+)\]/g)
+  for (const matched of matches) {
+    const normalized = normalizeWordKey(matched[1] || '')
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    targetWords.push(normalized)
+  }
+  return targetWords
 }
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
+
 const normalizeVocabularySize = (raw: number) => {
   if (!Number.isFinite(raw)) return null
   const rounded = Math.round(raw)
@@ -96,6 +139,25 @@ const normalizeVocabularySize = (raw: number) => {
   return rounded
 }
 
+const normalizeMeaningMap = (raw: unknown) => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const meaning: Record<string, string> = {}
+  for (const [rawKey, rawValue] of Object.entries(raw)) {
+    if (typeof rawValue !== 'string') continue
+    const key = normalizeWordKey(rawKey)
+    const value = rawValue.trim()
+    if (!key || !value) continue
+    meaning[key] = value
+  }
+  return meaning
+}
+
+const hasExactWordKeys = (meaning: Record<string, string>, targetWords: string[]) => {
+  const expected = [...targetWords].sort()
+  const actual = Object.keys(meaning).sort()
+  return JSON.stringify(actual) === JSON.stringify(expected)
+}
+
 export default defineEventHandler(async (event) => {
   const body = await readBody<RequestBody>(event)
   const paragraph = normalizeText(body)
@@ -104,12 +166,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: '缺少英文段落 text' })
   }
 
-  const { siliconflow } = useRuntimeConfig()
   const bodyConfig = typeof body === 'object' && body !== null ? body : {}
-  const apiKey = pickConfigValue(bodyConfig.apiKey, siliconflow.apiKey)
-  const baseUrlRaw = pickConfigValue(bodyConfig.baseUrl, siliconflow.baseUrl)
-  const model = pickConfigValue(bodyConfig.model, siliconflow.model)
-  const baseUrl = baseUrlRaw ? normalizeBaseUrl(baseUrlRaw) : ''
   const hasVocabularySize = Object.prototype.hasOwnProperty.call(bodyConfig, 'vocabularySize')
   const normalizedVocabularySize = normalizeVocabularySize(Number(bodyConfig.vocabularySize))
 
@@ -117,16 +174,49 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: '词汇量需要在 1000 到 20000 之间' })
   }
 
+  if (
+    Object.prototype.hasOwnProperty.call(bodyConfig, 'annotatedText') &&
+    typeof bodyConfig.annotatedText !== 'string'
+  ) {
+    throw createError({ statusCode: 400, statusMessage: 'annotatedText 必须是字符串' })
+  }
+
+  if (
+    Object.prototype.hasOwnProperty.call(bodyConfig, 'targetWords') &&
+    !Array.isArray(bodyConfig.targetWords)
+  ) {
+    throw createError({ statusCode: 400, statusMessage: 'targetWords 必须是字符串数组' })
+  }
+
+  const annotatedText = normalizeAnnotatedText(body, paragraph)
+  const normalizedTargetWords = normalizeTargetWords(bodyConfig.targetWords)
+  const targetWords =
+    normalizedTargetWords.length > 0
+      ? normalizedTargetWords
+      : extractTargetWordsFromAnnotatedText(annotatedText)
+
+  if (targetWords.length === 0) {
+    return {
+      sentence: paragraph,
+      meaning: {}
+    } satisfies SentenceDefinitionResponse
+  }
+
+  const { siliconflow } = useRuntimeConfig()
+  const apiKey = siliconflow.apiKey?.trim() || ''
+  const baseUrl = siliconflow.baseUrl?.trim() ? normalizeBaseUrl(siliconflow.baseUrl) : ''
+  const model = siliconflow.model?.trim() || ''
+
   if (!apiKey) {
-    throw createError({ statusCode: 400, statusMessage: '未配置 API Key' })
+    throw createError({ statusCode: 500, statusMessage: '服务端未配置 API Key' })
   }
 
   if (!baseUrl) {
-    throw createError({ statusCode: 400, statusMessage: '未配置 Base URL' })
+    throw createError({ statusCode: 500, statusMessage: '服务端未配置 Base URL' })
   }
 
   if (!model) {
-    throw createError({ statusCode: 400, statusMessage: '未配置模型名称' })
+    throw createError({ statusCode: 500, statusMessage: '服务端未配置模型名称' })
   }
 
   let prompt = ''
@@ -134,11 +224,13 @@ export default defineEventHandler(async (event) => {
     const promptTemplate = await readPromptTemplate()
     const tunedTemplate =
       normalizedVocabularySize !== null ? applyPromptLevel(promptTemplate, normalizedVocabularySize) : promptTemplate
-    prompt = tunedTemplate.replace('{{TEXT}}', paragraph)
+    prompt = tunedTemplate
+      .replace('{{TEXT}}', paragraph)
+      .replace(annotatedTextPlaceholder, annotatedText)
+      .replace(targetWordsPlaceholder, JSON.stringify(targetWords))
   } catch {
     throw createError({ statusCode: 500, statusMessage: '读取 prompt.md 失败' })
   }
-
 
   const response = await $fetch<ChatCompletionResponse>(`${baseUrl}/chat/completions`, {
     method: 'POST',
@@ -160,12 +252,36 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: '大模型未返回内容' })
   }
 
-
-  const parsed = parseJsonContent(content)
+  const parsed = parseJsonContent(content) as
+    | {
+        sentence?: unknown
+        meaning?: unknown
+      }
+    | null
 
   if (!parsed) {
     throw createError({ statusCode: 502, statusMessage: '大模型返回内容无法解析为 JSON' })
   }
 
-  return parsed
+  if (typeof parsed.sentence !== 'string') {
+    throw createError({ statusCode: 502, statusMessage: '大模型返回缺少 sentence 字段' })
+  }
+
+  if (parsed.sentence !== annotatedText) {
+    throw createError({ statusCode: 502, statusMessage: '大模型返回 sentence 与预处理文本不一致' })
+  }
+
+  const meaning = normalizeMeaningMap(parsed.meaning)
+  if (!meaning) {
+    throw createError({ statusCode: 502, statusMessage: '大模型返回缺少 meaning 对象' })
+  }
+
+  if (!hasExactWordKeys(meaning, targetWords)) {
+    throw createError({ statusCode: 502, statusMessage: '大模型返回 meaning 键集合与 targetWords 不一致' })
+  }
+
+  return {
+    sentence: parsed.sentence,
+    meaning
+  } satisfies SentenceDefinitionResponse
 })

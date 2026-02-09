@@ -24,7 +24,7 @@ export default defineNuxtConfig({
     siliconflow: {
       apiKey: process.env.SILICONFLOW_API_KEY,
       baseUrl: process.env.SILICONFLOW_BASE_URL,
-      model: process.env.SILICONFLOW_MODEL,
+      model: "Qwen/Qwen3-14B",
     },
   },
   nitro: {

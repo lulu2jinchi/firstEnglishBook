@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import Dexie, { type Table } from 'dexie'
+import lemmatizer from 'wink-lemmatizer'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
@@ -18,6 +19,34 @@ type TocItem = {
 type SentenceDefinitionResponse = {
   sentence?: string
   meaning?: Record<string, string>
+}
+
+type ProperNounFilterMode = 'person_only' | 'all_proper_nouns'
+
+type TokenInfo = {
+  raw: string
+  normalized: string
+  start: number
+  end: number
+  isSentenceStart: boolean
+  isTitleCase: boolean
+  prevChar: string
+  nextChar: string
+}
+
+type NameDetectionStats = Map<
+  string,
+  {
+    titleCaseCount: number
+    lowercaseCount: number
+    nonSentenceStartTitleCaseCount: number
+  }
+>
+
+type PreprocessedParagraph = {
+  annotatedText: string
+  targetWords: string[]
+  threshold: number
 }
 
 type DefinitionRecord = {
@@ -59,6 +88,73 @@ const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
 const vocabularyStorageKey = 'first-english-book-vocabulary-size'
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
+const fallbackVocabularySize = 6000
+const properNounFilterMode: ProperNounFilterMode = 'person_only'
+const nonNameWhitelist = new Set<string>([
+  'i',
+  'he',
+  'she',
+  'we',
+  'you',
+  'they',
+  'it',
+  'the',
+  'a',
+  'an',
+  'this',
+  'that',
+  'these',
+  'those',
+  'and',
+  'but',
+  'or',
+  'if',
+  'when',
+  'while',
+  'do',
+  'does',
+  'did',
+  'what',
+  'where',
+  'why',
+  'how',
+  'to',
+  'in',
+  'on',
+  'at',
+  'for',
+  'from',
+  'of',
+  'with',
+  'without',
+  'as',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'have',
+  'has',
+  'had',
+  'can',
+  'could',
+  'will',
+  'would',
+  'shall',
+  'should',
+  'may',
+  'might',
+  'must',
+  'not',
+  'no',
+  'yes',
+  'oh',
+  'ah',
+  'english'
+])
+let cocaRankMapPromise: Promise<Map<string, number>> | null = null
 
 const ensureReaderDefinitionDb = () => {
   if (readerDefinitionDb) return readerDefinitionDb
@@ -79,6 +175,223 @@ const readVocabularySizeFromStorage = (): number | null => {
     return rounded
   } catch {
     return null
+  }
+}
+
+const normalizeWordKey = (word: string) =>
+  word
+    .toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/^[^a-z'-]+|[^a-z'-]+$/g, '')
+
+const isContractionToken = (token: string) => /[A-Za-z][’'][A-Za-z]/.test(token)
+const isTitleCaseToken = (token: string) => {
+  const normalized = token.replace(/’/g, "'")
+  const parts = normalized.split("'")
+  if (parts.length === 0) return false
+  return parts.every((part, index) =>
+    index === 0 ? /^[A-Z][a-z]+$/.test(part) : /^[A-Z]?[a-z]+$/.test(part)
+  )
+}
+
+const isSentenceStartAt = (text: string, start: number) => {
+  let cursor = start - 1
+  while (cursor >= 0 && /[\s"'“”‘’([{]/.test(text[cursor] || '')) {
+    cursor -= 1
+  }
+  if (cursor < 0) return true
+  return /[.!?]/.test(text[cursor] || '')
+}
+
+const collectTokenInfos = (text: string) => {
+  const tokenInfos: TokenInfo[] = []
+  const tokenInfoByStart = new Map<number, TokenInfo>()
+  const stats: NameDetectionStats = new Map()
+  const regex = /[A-Za-z]+(?:[’'][A-Za-z]+)*/g
+  let matched = regex.exec(text)
+
+  while (matched) {
+    const raw = matched[0]
+    const start = matched.index
+    const end = start + raw.length
+    const normalized = normalizeWordKey(raw)
+    if (!normalized) {
+      matched = regex.exec(text)
+      continue
+    }
+
+    const tokenInfo: TokenInfo = {
+      raw,
+      normalized,
+      start,
+      end,
+      isSentenceStart: isSentenceStartAt(text, start),
+      isTitleCase: isTitleCaseToken(raw),
+      prevChar: start > 0 ? text[start - 1] || '' : '',
+      nextChar: end < text.length ? text[end] || '' : ''
+    }
+    tokenInfos.push(tokenInfo)
+    tokenInfoByStart.set(start, tokenInfo)
+
+    let stat = stats.get(normalized)
+    if (!stat) {
+      stat = {
+        titleCaseCount: 0,
+        lowercaseCount: 0,
+        nonSentenceStartTitleCaseCount: 0
+      }
+      stats.set(normalized, stat)
+    }
+    if (tokenInfo.isTitleCase) {
+      stat.titleCaseCount += 1
+      if (!tokenInfo.isSentenceStart) {
+        stat.nonSentenceStartTitleCaseCount += 1
+      }
+    } else {
+      stat.lowercaseCount += 1
+    }
+
+    matched = regex.exec(text)
+  }
+
+  return {
+    tokenInfos,
+    tokenInfoByStart,
+    stats
+  }
+}
+
+const isLikelyProperNounToken = (
+  tokenInfo: TokenInfo,
+  stats: NameDetectionStats,
+  rank: number | null
+) => {
+  if (!tokenInfo.isTitleCase) return false
+  if (nonNameWhitelist.has(tokenInfo.normalized)) return false
+
+  const stat = stats.get(tokenInfo.normalized)
+  const titleCaseCount = stat?.titleCaseCount || 0
+  const lowercaseCount = stat?.lowercaseCount || 0
+  const nonSentenceStartTitleCaseCount = stat?.nonSentenceStartTitleCaseCount || 0
+  const hasStrongNameSignal = nonSentenceStartTitleCaseCount > 0 || titleCaseCount > 1
+  const aggressiveUnknownTitle =
+    lowercaseCount === 0 &&
+    rank === null &&
+    tokenInfo.normalized.length >= 3
+
+  if (properNounFilterMode === 'all_proper_nouns') {
+    return hasStrongNameSignal || aggressiveUnknownTitle || lowercaseCount === 0
+  }
+
+  return hasStrongNameSignal || aggressiveUnknownTitle
+}
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const normalizeVocabularyThreshold = (value: number | null) => {
+  if (!Number.isFinite(value)) return fallbackVocabularySize
+  const rounded = Math.round(Number(value))
+  return Math.max(minVocabularySize, Math.min(maxVocabularySize, rounded))
+}
+
+const loadCocaRankMap = async () => {
+  if (!cocaRankMapPromise) {
+    cocaRankMapPromise = fetch('/coca-20000.json')
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`读取 COCA 词频失败: ${response.status}`)
+        }
+        return (await response.json()) as Record<string, number>
+      })
+      .then((parsed) => {
+        const map = new Map<string, number>()
+        for (const [word, rank] of Object.entries(parsed)) {
+          const normalized = normalizeWordKey(word)
+          if (!normalized || !Number.isFinite(rank)) continue
+          map.set(normalized, Number(rank))
+        }
+        return map
+      })
+  }
+  return cocaRankMapPromise
+}
+
+const getLemmaCandidates = (word: string) => {
+  const forms: string[] = []
+  const push = (value?: string | null) => {
+    const normalized = normalizeWordKey(value || '')
+    if (!normalized || forms.includes(normalized)) return
+    forms.push(normalized)
+  }
+
+  const normalizedWord = normalizeWordKey(word)
+  push(word)
+  push(word.replace(/'/g, ''))
+  push(word.replace(/-/g, ''))
+  if (normalizedWord === 'an') {
+    push('a')
+  }
+
+  try {
+    push(lemmatizer.noun(word))
+    push(lemmatizer.verb(word))
+    push(lemmatizer.adjective(word))
+  } catch {
+    // ignore lemmatizer fallback
+  }
+
+  return forms
+}
+
+const lookupCocaRank = (word: string, rankMap: Map<string, number>) => {
+  let minRank: number | null = null
+  for (const form of getLemmaCandidates(word)) {
+    const rank = rankMap.get(form)
+    if (typeof rank !== 'number') continue
+    minRank = minRank === null ? rank : Math.min(minRank, rank)
+  }
+  return minRank
+}
+
+const preprocessParagraphForDefinition = async (
+  text: string,
+  vocabularySize: number | null
+): Promise<PreprocessedParagraph> => {
+  const threshold = normalizeVocabularyThreshold(vocabularySize)
+  const rankMap = await loadCocaRankMap()
+  const markedWords = new Set<string>()
+  const targetWords: string[] = []
+  const { tokenInfoByStart, stats } = collectTokenInfos(text)
+
+  const annotatedText = text.replace(/[A-Za-z]+(?:[’'][A-Za-z]+)*/g, (token, offset) => {
+    if (isContractionToken(token)) return token
+    const tokenInfo = tokenInfoByStart.get(offset)
+    if (!tokenInfo) return token
+    const normalizedWord = normalizeWordKey(token)
+    if (!normalizedWord) return token
+    const rank = lookupCocaRank(normalizedWord, rankMap)
+    if (isLikelyProperNounToken(tokenInfo, stats, rank)) {
+      return token
+    }
+    const shouldTranslate = rank === null || rank > threshold
+    if (!shouldTranslate || markedWords.has(normalizedWord)) {
+      return token
+    }
+    markedWords.add(normalizedWord)
+    targetWords.push(normalizedWord)
+    return `[${token}]`
+  })
+
+  return {
+    annotatedText,
+    targetWords,
+    threshold
   }
 }
 
@@ -141,6 +454,7 @@ export function useReader(
   let visibleMessageHandler: ((event: MessageEvent) => void) | null = null
   const paragraphDefinitionStatus = new Set<string>()
   const paragraphDocumentMap = new Map<string, Document>()
+  const pendingDefinitionMap = new Map<string, SentenceDefinitionResponse>()
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
   const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
   let tooltipEl: HTMLDivElement | null = null
@@ -363,6 +677,7 @@ export function useReader(
     book?.destroy?.()
     paragraphDefinitionStatus.clear()
     paragraphDocumentMap.clear()
+    pendingDefinitionMap.clear()
     documentParagraphIds = new WeakMap<Document, Set<string>>()
 
     const openOptions =
@@ -736,10 +1051,52 @@ export function useReader(
   }
 
   const buildSentenceHtml = (sentence: string) => {
-    return sentence.replace(/<(\d+)>([\s\S]*?)<\/\1>/g, (_match, id, content) => {
-      return `<span data-meaning-id="${id}">${content}</span>`
-    })
+    const bracketWordPattern = /[A-Za-z]+(?:[’'][A-Za-z]+)*/g
+    let result = ''
+    let lastIndex = 0
+    let matched = bracketWordPattern.exec(sentence)
+
+    while (matched) {
+      const matchedText = matched[0]
+      const start = matched.index
+      const end = start + matchedText.length
+      const isBracketWord =
+        sentence[start - 1] === '[' &&
+        sentence[end] === ']'
+
+      if (!isBracketWord) {
+        matched = bracketWordPattern.exec(sentence)
+        continue
+      }
+
+      const normalizedWord = normalizeWordKey(matchedText)
+      if (!normalizedWord) {
+        matched = bracketWordPattern.exec(sentence)
+        continue
+      }
+
+      result += escapeHtml(sentence.slice(lastIndex, start - 1))
+      result += `<span data-meaning-key="${normalizedWord}">${escapeHtml(matchedText)}</span>`
+      lastIndex = end + 1
+      matched = bracketWordPattern.exec(sentence)
+    }
+
+    result += escapeHtml(sentence.slice(lastIndex))
+    return result
   }
+
+  const normalizeMeaningMap = (meaning: Record<string, string>) => {
+    const normalized: Record<string, string> = {}
+    for (const [rawKey, rawMeaning] of Object.entries(meaning)) {
+      if (typeof rawMeaning !== 'string') continue
+      const key = normalizeWordKey(rawKey)
+      if (!key) continue
+      normalized[key] = rawMeaning
+    }
+    return normalized
+  }
+
+  const isLegacyTaggedSentence = (sentence: string) => /<(\d+)>[\s\S]*?<\/\1>/.test(sentence)
 
   const getTopWindow = () => {
     if (typeof window === 'undefined') return null
@@ -778,7 +1135,7 @@ export function useReader(
     if (tooltipDismissHandlers.has(doc)) return
     const handler = (event: MouseEvent) => {
       const target = event.target as Element | null
-      const clickedMeaning = target?.closest?.('span[data-meaning-id]')
+      const clickedMeaning = target?.closest?.('span[data-meaning-key]')
       if (!clickedMeaning) {
         hideTooltip()
       }
@@ -957,16 +1314,16 @@ export function useReader(
     paragraphEl.innerHTML = buildSentenceHtml(resp.sentence)
     paragraphEl.dataset.annotated = 'true'
 
-    const meaningMap = resp.meaning
-    const spans = Array.from(paragraphEl.querySelectorAll<HTMLSpanElement>('span[data-meaning-id]'))
+    const meaningMap = normalizeMeaningMap(resp.meaning)
+    const spans = Array.from(paragraphEl.querySelectorAll<HTMLSpanElement>('span[data-meaning-key]'))
     // eslint-disable-next-line no-console
     console.log('应用段落标注完成', { paragraphId, spanCount: spans.length })
     spans.forEach((span) => {
-      const meaningId = span.dataset.meaningId || ''
+      const meaningKey = normalizeWordKey(span.dataset.meaningKey || '')
       span.style.textDecoration = 'underline'
       span.style.cursor = 'pointer'
       span.addEventListener('click', () => {
-        const meaning = meaningMap[meaningId]
+        const meaning = meaningMap[meaningKey]
         // eslint-disable-next-line no-console
         console.log(meaning)
         if (meaning) {
@@ -980,11 +1337,50 @@ export function useReader(
     return true
   }
 
+  const getCandidateDocsForParagraph = (paragraphId: string, fallbackDoc?: Document | null) => {
+    const docs: Document[] = []
+    const mappedDoc = paragraphDocumentMap.get(paragraphId)
+    if (mappedDoc) {
+      docs.push(mappedDoc)
+    }
+    if (fallbackDoc && !docs.includes(fallbackDoc)) {
+      docs.push(fallbackDoc)
+    }
+    return docs
+  }
+
+  const applyDefinitionToBestDoc = (
+    paragraphId: string,
+    resp: SentenceDefinitionResponse,
+    fallbackDoc?: Document | null
+  ) => {
+    const docs = getCandidateDocsForParagraph(paragraphId, fallbackDoc)
+    for (const doc of docs) {
+      if (applyDefinitionToParagraph(doc, paragraphId, resp)) {
+        pendingDefinitionMap.delete(paragraphId)
+        return true
+      }
+    }
+    pendingDefinitionMap.set(paragraphId, resp)
+    return false
+  }
+
   const fetchParagraphDefinition = async (text: string) => {
     const vocabularySize = readVocabularySizeFromStorage()
+    const preprocessed = await preprocessParagraphForDefinition(text, vocabularySize)
+
+    if (preprocessed.targetWords.length === 0) {
+      return {
+        sentence: text,
+        meaning: {}
+      } satisfies SentenceDefinitionResponse
+    }
+
     const payload = {
       text,
-      ...(vocabularySize ? { vocabularySize } : {})
+      annotatedText: preprocessed.annotatedText,
+      targetWords: preprocessed.targetWords,
+      vocabularySize: preprocessed.threshold
     }
     const response = await fetch('/api/querySentenceDefination', {
       method: 'POST',
@@ -1020,8 +1416,12 @@ export function useReader(
       try {
         const cached = await db.definitions.get(cacheKey)
         if (cached?.sentence && cached?.meaning) {
-          applyDefinitionToParagraph(sourceDoc, paragraphId, cached)
-          return
+          if (isLegacyTaggedSentence(cached.sentence)) {
+            await db.definitions.delete(cacheKey)
+          } else {
+            applyDefinitionToBestDoc(paragraphId, cached, sourceDoc)
+            return
+          }
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -1056,7 +1456,7 @@ export function useReader(
               console.warn('写入 Dexie 缓存失败', error)
             }
           }
-          applyDefinitionToParagraph(sourceDoc, paragraphId, resp)
+          applyDefinitionToBestDoc(paragraphId, resp, sourceDoc)
         } catch (error) {
           const status = (error as Error & { status?: number }).status
           const body = (error as Error & { body?: string }).body
@@ -1086,6 +1486,11 @@ export function useReader(
       documentParagraphIds.set(doc, docParagraphs)
     }
     docParagraphs.add(paragraphId)
+
+    const pendingDefinition = pendingDefinitionMap.get(paragraphId)
+    if (pendingDefinition && applyDefinitionToParagraph(doc, paragraphId, pendingDefinition)) {
+      pendingDefinitionMap.delete(paragraphId)
+    }
   }
 
   const removeDocumentParagraphs = (doc: Document) => {
