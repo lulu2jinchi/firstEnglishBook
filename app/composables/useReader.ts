@@ -49,6 +49,11 @@ type PreprocessedParagraph = {
   threshold: number
 }
 
+type SentenceMarker = {
+  rawWord: string
+  meaningKey: string
+}
+
 type DefinitionRecord = {
   key: string
   bookKey: string
@@ -185,6 +190,13 @@ const normalizeWordKey = (word: string) =>
     .replace(/^[^a-z'-]+|[^a-z'-]+$/g, '')
 
 const isContractionToken = (token: string) => /[A-Za-z][’'][A-Za-z]/.test(token)
+const isAbbreviationSegment = (text: string, start: number, end: number, token: string) => {
+  if (!/^[A-Za-z]+$/.test(token)) return false
+  if (token.length !== 1) return false
+  const prev = start > 0 ? text[start - 1] || '' : ''
+  const next = end < text.length ? text[end] || '' : ''
+  return prev === '.' || next === '.'
+}
 const isTitleCaseToken = (token: string) => {
   const normalized = token.replace(/’/g, "'")
   const parts = normalized.split("'")
@@ -286,18 +298,48 @@ const isLikelyProperNounToken = (
   return hasStrongNameSignal || aggressiveUnknownTitle
 }
 
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-
 const normalizeVocabularyThreshold = (value: number | null) => {
   if (!Number.isFinite(value)) return fallbackVocabularySize
   const rounded = Math.round(Number(value))
   return Math.max(minVocabularySize, Math.min(maxVocabularySize, rounded))
+}
+
+const buildDefinitionConfigSignature = (threshold: number) =>
+  `vocabulary-${threshold}:properNoun-${properNounFilterMode}`
+
+const toSafeSegment = (value: string, fallback: string) => {
+  const safe = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return (safe || fallback).slice(0, 80)
+}
+
+const resolveSectionIdentity = (contents: any, doc: Document) => {
+  const section = contents?.section || {}
+  const numericIndex =
+    Number.isFinite(Number(section?.index)) ? `spine-${Number(section.index)}` : ''
+  const firstIdElement = doc.body?.querySelector<HTMLElement>('[id]')
+  const firstId = firstIdElement?.id || ''
+
+  const candidates = [
+    section?.href,
+    section?.canonical,
+    section?.url,
+    section?.idref,
+    section?.id,
+    numericIndex,
+    firstId
+  ]
+
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue
+    const trimmed = candidate.trim()
+    if (!trimmed) continue
+    return toSafeSegment(trimmed, 'chapter')
+  }
+
+  return 'chapter'
 }
 
 const loadCocaRankMap = async () => {
@@ -370,6 +412,9 @@ const preprocessParagraphForDefinition = async (
   const { tokenInfoByStart, stats } = collectTokenInfos(text)
 
   const annotatedText = text.replace(/[A-Za-z]+(?:[’'][A-Za-z]+)*/g, (token, offset) => {
+    const tokenStart = Number(offset)
+    const tokenEnd = tokenStart + token.length
+    if (isAbbreviationSegment(text, tokenStart, tokenEnd, token)) return token
     if (isContractionToken(token)) return token
     const tokenInfo = tokenInfoByStart.get(offset)
     if (!tokenInfo) return token
@@ -842,7 +887,7 @@ export function useReader(
       const win: any = contents?.window
       if (!doc || !win) return
 
-      const sectionHref: string = contents?.section?.href || 'chapter'
+      const sectionIdentity = resolveSectionIdentity(contents, doc)
       const candidates = Array.from(doc.querySelectorAll('p, div')) as HTMLElement[]
 
       const blockTags = new Set([
@@ -868,7 +913,7 @@ export function useReader(
       filteredParas.forEach((el, index) => {
         el.classList.add('epub-paragraph')
         if (!el.dataset.paraId) {
-          el.dataset.paraId = buildParagraphId(sectionHref, index + 1)
+          el.dataset.paraId = buildParagraphId(sectionIdentity, index + 1)
         }
         if (el.dataset.paraId) {
           trackParagraphDocument(el.dataset.paraId, doc)
@@ -969,7 +1014,7 @@ export function useReader(
 
         const payload = {
           type: 'epub-visible-paragraphs',
-          chapterHref: sectionHref,
+          chapterHref: sectionIdentity,
           paragraphs: visibleParas.map((item) => ({
             id: item.id,
             text: item.text,
@@ -1050,39 +1095,133 @@ export function useReader(
     return value.replace(/["\\]/g, '\\$&')
   }
 
-  const buildSentenceHtml = (sentence: string) => {
-    const bracketWordPattern = /[A-Za-z]+(?:[’'][A-Za-z]+)*/g
-    let result = ''
-    let lastIndex = 0
+  const parseAnnotatedSentence = (sentence: string) => {
+    const markers: SentenceMarker[] = []
+    const bracketWordPattern = /\[([A-Za-z]+(?:[’'][A-Za-z]+)*)\]/g
     let matched = bracketWordPattern.exec(sentence)
 
     while (matched) {
-      const matchedText = matched[0]
-      const start = matched.index
-      const end = start + matchedText.length
-      const isBracketWord =
-        sentence[start - 1] === '[' &&
-        sentence[end] === ']'
-
-      if (!isBracketWord) {
-        matched = bracketWordPattern.exec(sentence)
-        continue
+      const rawWord = matched[1] || ''
+      const meaningKey = normalizeWordKey(rawWord)
+      if (meaningKey) {
+        markers.push({
+          rawWord,
+          meaningKey
+        })
       }
 
-      const normalizedWord = normalizeWordKey(matchedText)
-      if (!normalizedWord) {
-        matched = bracketWordPattern.exec(sentence)
-        continue
-      }
-
-      result += escapeHtml(sentence.slice(lastIndex, start - 1))
-      result += `<span data-meaning-key="${normalizedWord}">${escapeHtml(matchedText)}</span>`
-      lastIndex = end + 1
       matched = bracketWordPattern.exec(sentence)
     }
 
-    result += escapeHtml(sentence.slice(lastIndex))
-    return result
+    return { markers }
+  }
+
+  const applySentenceMarkersToParagraph = (paragraphEl: HTMLElement, sentence: string) => {
+    const { markers } = parseAnnotatedSentence(sentence)
+    if (markers.length === 0) {
+      return {
+        success: true,
+        spanCount: 0
+      }
+    }
+
+    const isWordChar = (char: string) => /[A-Za-z’']/.test(char)
+    const normalizeApostrophe = (value: string) => value.replace(/’/g, "'")
+    const isWordMatchAt = (text: string, start: number, rawWord: string) => {
+      const target = normalizeApostrophe(rawWord).toLowerCase()
+      const segment = normalizeApostrophe(text.slice(start, start + rawWord.length)).toLowerCase()
+      if (segment !== target) return false
+      const prev = start > 0 ? text[start - 1] || '' : ''
+      const next = start + rawWord.length < text.length ? text[start + rawWord.length] || '' : ''
+      return !isWordChar(prev) && !isWordChar(next)
+    }
+    const findWordMatchStart = (text: string, rawWord: string, fromIndex: number) => {
+      const maxStart = text.length - rawWord.length
+      for (let i = Math.max(0, fromIndex); i <= maxStart; i += 1) {
+        if (isWordMatchAt(text, i, rawWord)) return i
+      }
+      return -1
+    }
+    const wrapMatchInTextNode = (textNode: Text, start: number, rawWord: string, meaningKey: string) => {
+      const value = textNode.nodeValue || ''
+      const matchText = value.slice(start, start + rawWord.length)
+      if (!matchText) return null
+      const before = value.slice(0, start)
+      const after = value.slice(start + rawWord.length)
+      const parent = textNode.parentNode
+      if (!parent) return null
+      const doc = textNode.ownerDocument
+      const span = doc.createElement('span')
+      span.dataset.meaningKey = meaningKey
+      span.dataset.rawWord = rawWord
+      span.textContent = matchText
+
+      if (before) {
+        parent.insertBefore(doc.createTextNode(before), textNode)
+      }
+      parent.insertBefore(span, textNode)
+      let afterNode: Text | null = null
+      if (after) {
+        afterNode = doc.createTextNode(after)
+        parent.insertBefore(afterNode, textNode)
+      }
+      parent.removeChild(textNode)
+      return { span, afterNode }
+    }
+    const textNodes: Text[] = []
+    const walker = paragraphEl.ownerDocument.createTreeWalker(paragraphEl, NodeFilter.SHOW_TEXT)
+    let currentNode = walker.nextNode()
+    while (currentNode) {
+      const textNode = currentNode as Text
+      if (textNode.nodeValue) {
+        textNodes.push(textNode)
+      }
+      currentNode = walker.nextNode()
+    }
+
+    let markerIndex = 0
+    const insertedSpans: HTMLSpanElement[] = []
+
+    for (const initialNode of textNodes) {
+      let nodeCursor: Text | null = initialNode
+      while (nodeCursor && markerIndex < markers.length) {
+        const marker = markers[markerIndex]
+        const value = nodeCursor.nodeValue || ''
+        if (!value || marker.rawWord.length === 0) break
+
+        const matchStart = findWordMatchStart(value, marker.rawWord, 0)
+        if (matchStart === -1) break
+
+        const wrapped = wrapMatchInTextNode(nodeCursor, matchStart, marker.rawWord, marker.meaningKey)
+        if (!wrapped) {
+          break
+        }
+        insertedSpans.push(wrapped.span)
+        markerIndex += 1
+        nodeCursor = wrapped.afterNode
+      }
+      if (markerIndex >= markers.length) break
+    }
+
+    if (markerIndex !== markers.length) {
+      for (let i = insertedSpans.length - 1; i >= 0; i -= 1) {
+        const span = insertedSpans[i]
+        const parent = span.parentNode
+        if (!parent) continue
+        const textNode = span.ownerDocument.createTextNode(span.textContent || '')
+        parent.replaceChild(textNode, span)
+        parent.normalize()
+      }
+      return {
+        success: false,
+        spanCount: 0
+      }
+    }
+
+    return {
+      success: true,
+      spanCount: insertedSpans.length
+    }
   }
 
   const normalizeMeaningMap = (meaning: Record<string, string>) => {
@@ -1295,8 +1434,6 @@ export function useReader(
       console.warn('段落释义缺少 sentence 或 meaning', { paragraphId, resp })
       return false
     }
-    console.log('selectorId', paragraphId)
-    console.log('doc: ', doc)
     const selectorId = escapeSelectorValue(paragraphId)
     const paragraphEl = doc.querySelector<HTMLElement>(`[data-para-id="${selectorId}"]`)
     if (!paragraphEl) {
@@ -1310,22 +1447,23 @@ export function useReader(
       return true
     }
 
-    attachTooltipDismissHandler(doc)
-    paragraphEl.innerHTML = buildSentenceHtml(resp.sentence)
-    paragraphEl.dataset.annotated = 'true'
-
     const meaningMap = normalizeMeaningMap(resp.meaning)
+    attachTooltipDismissHandler(doc)
+    const markerResult = applySentenceMarkersToParagraph(paragraphEl, resp.sentence)
+    if (!markerResult.success) {
+      // eslint-disable-next-line no-console
+      console.warn('段落文本与 sentence 不匹配，跳过标注', { paragraphId })
+      return false
+    }
+
+    paragraphEl.dataset.annotated = 'true'
     const spans = Array.from(paragraphEl.querySelectorAll<HTMLSpanElement>('span[data-meaning-key]'))
-    // eslint-disable-next-line no-console
-    console.log('应用段落标注完成', { paragraphId, spanCount: spans.length })
     spans.forEach((span) => {
       const meaningKey = normalizeWordKey(span.dataset.meaningKey || '')
       span.style.textDecoration = 'underline'
       span.style.cursor = 'pointer'
       span.addEventListener('click', () => {
         const meaning = meaningMap[meaningKey]
-        // eslint-disable-next-line no-console
-        console.log(meaning)
         if (meaning) {
           void showTooltipForSpan(span, doc, meaning)
         } else {
@@ -1411,7 +1549,9 @@ export function useReader(
 
     const db = ensureReaderDefinitionDb()
     const currentBookKey = bookKey.value
-    const cacheKey = `${currentBookKey}:${paragraphId}`
+    const thresholdForCache = normalizeVocabularyThreshold(readVocabularySizeFromStorage())
+    const definitionConfigSignature = buildDefinitionConfigSignature(thresholdForCache)
+    const cacheKey = `${currentBookKey}:${paragraphId}:${definitionConfigSignature}`
     if (db) {
       try {
         const cached = await db.definitions.get(cacheKey)

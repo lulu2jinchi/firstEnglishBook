@@ -263,12 +263,10 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: '大模型返回内容无法解析为 JSON' })
   }
 
-  if (typeof parsed.sentence !== 'string') {
-    throw createError({ statusCode: 502, statusMessage: '大模型返回缺少 sentence 字段' })
-  }
-
-  if (parsed.sentence !== annotatedText) {
-    throw createError({ statusCode: 502, statusMessage: '大模型返回 sentence 与预处理文本不一致' })
+  const modelSentence = typeof parsed.sentence === 'string' ? parsed.sentence : ''
+  if (modelSentence && modelSentence !== annotatedText) {
+    // eslint-disable-next-line no-console
+    console.warn('大模型返回 sentence 与预处理文本不一致，已回退为 annotatedText')
   }
 
   const meaning = normalizeMeaningMap(parsed.meaning)
@@ -281,7 +279,7 @@ export default defineEventHandler(async (event) => {
   }
 
   return {
-    sentence: parsed.sentence,
+    sentence: annotatedText,
     meaning
   } satisfies SentenceDefinitionResponse
 })
