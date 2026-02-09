@@ -10,7 +10,7 @@ Always use Chinese to response.
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
 - app/components/ReaderShell.vue：页面 UI、样式与基础布局。
 - app/components/BottomTabBar.vue：主页/个人中心共用底部导航。
-- app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件）。
+- app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件、段落释义请求队列与批处理）。
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
@@ -28,12 +28,19 @@ example output:
 
 ```json
 {
-  "sentence": "The old <1>lighthouse</1> stood against the <2>relentless</2> winds, its keeper <3>devising</3> ways to preserve the <4>fragile</4> glass.",
+  "sentence": "The old [lighthouse] stood against the [relentless] winds, its keeper [devising] ways to preserve the [fragile] glass.",
   "meaning": {
-    "1": "灯塔，一种用于指引船只航行的建筑物。",
-    "2": "持续不断的，形容风势强劲且不停歇。",
-    "3": "想出或设计出方法或计划。",
-    "4": "易碎的，形容玻璃等物品容易破损。"
+    "lighthouse": "灯塔，用于给船只导航定位的塔状建筑。",
+    "relentless": "持续不断的，形容风势强且没有停歇。",
+    "devising": "设法想出，指在当时情境中构思办法。",
+    "fragile": "易碎的，指玻璃这种材料容易破裂。"
   }
 }
 ```
+
+阅读器释义请求（最新）：
+- 可见段落先做去重与缓存命中判断，再进入释义流程。
+- 短段落批量策略：`<= 120` 字符的段落，最多 `3` 段聚合为一次请求；长段落保持单段请求。
+- 批量请求仍调用 `/api/querySentenceDefination`，前端拼接 `text/annotatedText` 并合并 `targetWords`，返回后再按段落拆分并渲染。
+- 队列请求间隔为 `1000ms`，限流沿用退避逻辑。
+- 失败重试策略：同一批次立即重试，最多 `3` 次（含首次）。
