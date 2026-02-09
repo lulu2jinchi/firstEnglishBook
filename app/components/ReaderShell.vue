@@ -440,7 +440,7 @@ const activeThemeId = ref(normalizeThemeId(getStorageValue(readerThemeStorageKey
 const activeFontId = ref(normalizeFontId(getStorageValue(readerFontStorageKey)));
 const fontSize = ref(
   clampNumber(
-    Number(getStorageValue(readerFontSizeStorageKey) || 20),
+    Number(getStorageValue(readerFontSizeStorageKey) || 16),
     minFontSize,
     maxFontSize
   )
@@ -890,11 +890,11 @@ applyLineHeight(lineHeight.value, false);
 
 .panel-sheet {
   width: min(560px, 100%);
-  max-height: 80vh;
+  max-height: min(86dvh, 86vh);
   background: var(--reader-panel, #ffffff);
   color: var(--reader-text, #1f2937);
   border-radius: 22px 22px 0 0;
-  padding: 10px 18px 24px;
+  padding: 10px 18px calc(24px + env(safe-area-inset-bottom, 0px));
   box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.18);
   overflow: hidden;
   overscroll-behavior: contain;
@@ -913,11 +913,38 @@ applyLineHeight(lineHeight.value, false);
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: calc(80vh - 40px);
+  max-height: calc(min(86dvh, 86vh) - 40px);
   overflow: auto;
-  padding-bottom: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+}
+
+@media (min-width: 960px) {
+  .panel-overlay {
+    justify-content: flex-end;
+    align-items: stretch;
+    background: rgba(15, 23, 42, 0.18);
+    backdrop-filter: blur(2px);
+  }
+
+  .panel-sheet {
+    width: min(360px, 38vw);
+    max-height: 100dvh;
+    height: 100%;
+    border-radius: 18px 0 0 18px;
+    padding: 18px 20px 20px;
+    box-shadow: -10px 0 30px rgba(15, 23, 42, 0.18);
+  }
+
+  .panel-content {
+    max-height: calc(100dvh - 48px);
+    padding-bottom: 8px;
+  }
+
+  .panel-handle {
+    display: none;
+  }
 }
 
 .panel-content h3 {

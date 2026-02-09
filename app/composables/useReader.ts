@@ -20,12 +20,6 @@ type SentenceDefinitionResponse = {
   meaning?: Record<string, string>
 }
 
-type ModelConfig = {
-  baseUrl: string
-  apiKey: string
-  model: string
-}
-
 type DefinitionRecord = {
   key: string
   bookKey: string
@@ -62,7 +56,6 @@ class ReaderDefinitionDB extends Dexie {
 let readerDefinitionDb: ReaderDefinitionDB | null = null
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
-const modelConfigStorageKey = 'first-english-book-model-config'
 const vocabularyStorageKey = 'first-english-book-vocabulary-size'
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
@@ -72,26 +65,6 @@ const ensureReaderDefinitionDb = () => {
   if (typeof window === 'undefined') return null
   readerDefinitionDb = new ReaderDefinitionDB()
   return readerDefinitionDb
-}
-
-const readModelConfigFromStorage = (): ModelConfig | null => {
-  if (typeof window === 'undefined') return null
-  try {
-    const raw = window.localStorage.getItem(modelConfigStorageKey)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<ModelConfig>
-    const baseUrl = parsed.baseUrl?.trim() || ''
-    const apiKey = parsed.apiKey?.trim() || ''
-    const model = parsed.model?.trim() || ''
-    if (!baseUrl || !apiKey || !model) return null
-    return {
-      baseUrl: baseUrl.replace(/\/+$/, ''),
-      apiKey,
-      model
-    }
-  } catch {
-    return null
-  }
 }
 
 const readVocabularySizeFromStorage = (): number | null => {
@@ -190,7 +163,7 @@ export function useReader(
     text: '#1f2937'
   })
   const readerFontFamily = ref('"Georgia", "Times New Roman", serif')
-  const readerFontSize = ref(20)
+  const readerFontSize = ref(16)
   const readerLineHeight = ref(1.6)
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -289,7 +262,7 @@ export function useReader(
       return reason ? `${base}：${reason}` : base
     }
     if (status === 401 || status === 403) {
-      return reason ? `接口鉴权失败：${reason}` : '接口鉴权失败，请检查模型配置'
+      return reason ? `接口鉴权失败：${reason}` : '接口鉴权失败，请联系管理员检查服务端模型配置'
     }
     if (status === 400) {
       return reason ? `接口参数错误：${reason}` : '接口参数错误，请检查当前配置'
@@ -1008,11 +981,9 @@ export function useReader(
   }
 
   const fetchParagraphDefinition = async (text: string) => {
-    const modelConfig = readModelConfigFromStorage()
     const vocabularySize = readVocabularySizeFromStorage()
     const payload = {
       text,
-      ...(modelConfig || {}),
       ...(vocabularySize ? { vocabularySize } : {})
     }
     const response = await fetch('/api/querySentenceDefination', {
