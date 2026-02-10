@@ -69,6 +69,10 @@ const isLoading = ref(false)
 const isSaving = ref(false)
 const hasLocalLevel = ref(false)
 
+type ReaderLevelResponse = {
+  vocabularySize?: number | string | null
+}
+
 const clampVocabularySize = (value: number) => {
   if (!Number.isFinite(value)) return fallbackVocabularySize
   return Math.min(maxVocabularySize, Math.max(minVocabularySize, Math.round(value)))
@@ -87,13 +91,53 @@ const readLocalVocabularySize = () => {
   }
 }
 
+const readServerVocabularySize = async () => {
+  try {
+    const response = await $fetch<ReaderLevelResponse>('/api/readerLevel')
+    const parsed = Number(response?.vocabularySize)
+    if (!Number.isFinite(parsed)) return null
+    return clampVocabularySize(parsed)
+  } catch {
+    return null
+  }
+}
+
+const writeLocalVocabularySize = (value: number) => {
+  if (typeof window === 'undefined') return false
+  try {
+    window.localStorage.setItem(vocabularyStorageKey, String(value))
+    return true
+  } catch {
+    return false
+  }
+}
+
+const writeServerVocabularySize = async (value: number) => {
+  try {
+    await $fetch('/api/readerLevel', {
+      method: 'POST',
+      body: {
+        vocabularySize: value
+      }
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const loadLevel = async () => {
   isLoading.value = true
   saveStatus.value = ''
   try {
     const localValue = readLocalVocabularySize()
-    vocabularySize.value = localValue ?? fallbackVocabularySize
+    const serverValue = await readServerVocabularySize()
+    const resolved = localValue ?? serverValue ?? fallbackVocabularySize
+    vocabularySize.value = resolved
     hasLocalLevel.value = typeof localValue === 'number'
+    if (localValue === null && typeof serverValue === 'number') {
+      hasLocalLevel.value = writeLocalVocabularySize(serverValue)
+    }
   } catch {
     saveStatus.value = '读取本地词汇量失败，请检查浏览器存储权限'
   } finally {
@@ -106,15 +150,24 @@ const saveLevel = async () => {
   saveStatus.value = ''
   try {
     const normalized = clampVocabularySize(vocabularySize.value)
-    if (typeof window === 'undefined') {
-      throw new Error('localStorage 不可用')
+    const localSaved = writeLocalVocabularySize(normalized)
+    const serverSaved = await writeServerVocabularySize(normalized)
+
+    if (!localSaved && !serverSaved) {
+      throw new Error('保存失败')
     }
-    window.localStorage.setItem(vocabularyStorageKey, String(normalized))
+
     vocabularySize.value = normalized
-    hasLocalLevel.value = true
-    saveStatus.value = '已保存到浏览器'
+    hasLocalLevel.value = localSaved
+    if (localSaved && serverSaved) {
+      saveStatus.value = '已保存到浏览器和服务端'
+    } else if (localSaved) {
+      saveStatus.value = '已保存到浏览器（服务端同步失败）'
+    } else {
+      saveStatus.value = '已保存到服务端（浏览器存储失败）'
+    }
   } catch {
-    saveStatus.value = '保存失败，请检查浏览器存储权限'
+    saveStatus.value = '保存失败，请检查浏览器存储权限与网络'
   } finally {
     isSaving.value = false
   }
