@@ -894,9 +894,9 @@ applyLineHeight(lineHeight.value, false);
 
 .reader-topbar {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
   right: 16px;
-  left: 16px;
+  left: auto;
   display: flex;
   justify-content: flex-end;
   z-index: 6;
@@ -905,10 +905,11 @@ applyLineHeight(lineHeight.value, false);
 
 .topbar-actions {
   display: flex;
+  flex-direction: column;
   gap: 6px;
   pointer-events: auto;
   padding: 6px;
-  border-radius: 999px;
+  border-radius: 16px;
   background: color-mix(in srgb, var(--reader-panel, #ffffff) 85%, transparent);
   border: 1px solid color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
   backdrop-filter: blur(10px) saturate(140%);
