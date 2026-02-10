@@ -170,6 +170,14 @@ import { useHead } from "#imports";
 import { useRoute } from "vue-router";
 import Dexie, { type Table } from "dexie";
 import { useReader } from "~/composables/useReader";
+import {
+  DEFAULT_READER_FONT_SIZE,
+  DEFAULT_READER_LINE_HEIGHT,
+  MAX_READER_FONT_SIZE,
+  MAX_READER_LINE_HEIGHT,
+  MIN_READER_FONT_SIZE,
+  MIN_READER_LINE_HEIGHT,
+} from "~/constants/readerPreferences";
 
 const viewerEl = ref<HTMLDivElement | null>(null);
 
@@ -397,10 +405,10 @@ const readerThemeStorageKey = "first-english-book-reader-theme";
 const readerFontStorageKey = "first-english-book-reader-font";
 const readerFontSizeStorageKey = "first-english-book-reader-font-size";
 const readerLineHeightStorageKey = "first-english-book-reader-line-height";
-const minFontSize = 14;
-const maxFontSize = 28;
-const minLineHeight = 1.2;
-const maxLineHeight = 2.2;
+const minFontSize = MIN_READER_FONT_SIZE;
+const maxFontSize = MAX_READER_FONT_SIZE;
+const minLineHeight = MIN_READER_LINE_HEIGHT;
+const maxLineHeight = MAX_READER_LINE_HEIGHT;
 
 const getStorageValue = (key: string) => {
   if (typeof window === "undefined") return null;
@@ -414,6 +422,11 @@ const setStorageValue = (key: string, value: string) => {
 
 const clampNumber = (value: number, min: number, max: number) => {
   return Math.min(max, Math.max(min, value));
+};
+
+const parseStoredNumber = (value: string | null, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
 const getThemeById = (id: string) =>
@@ -440,14 +453,14 @@ const activeThemeId = ref(normalizeThemeId(getStorageValue(readerThemeStorageKey
 const activeFontId = ref(normalizeFontId(getStorageValue(readerFontStorageKey)));
 const fontSize = ref(
   clampNumber(
-    Number(getStorageValue(readerFontSizeStorageKey) || 16),
+    parseStoredNumber(getStorageValue(readerFontSizeStorageKey), DEFAULT_READER_FONT_SIZE),
     minFontSize,
     maxFontSize
   )
 );
 const lineHeight = ref(
   clampNumber(
-    Number(getStorageValue(readerLineHeightStorageKey) || 1.6),
+    parseStoredNumber(getStorageValue(readerLineHeightStorageKey), DEFAULT_READER_LINE_HEIGHT),
     minLineHeight,
     maxLineHeight
   )

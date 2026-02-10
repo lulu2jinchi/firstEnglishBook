@@ -2,6 +2,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch, type ComputedRef, typ
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import Dexie, { type Table } from 'dexie'
 import lemmatizer from 'wink-lemmatizer'
+import {
+  DEFAULT_READER_FONT_SIZE,
+  DEFAULT_READER_LINE_HEIGHT
+} from '~/constants/readerPreferences'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous'
 
@@ -540,8 +544,8 @@ export function useReader(
     text: '#1f2937'
   })
   const readerFontFamily = ref('"Georgia", "Times New Roman", serif')
-  const readerFontSize = ref(16)
-  const readerLineHeight = ref(1.6)
+  const readerFontSize = ref(DEFAULT_READER_FONT_SIZE)
+  const readerLineHeight = ref(DEFAULT_READER_LINE_HEIGHT)
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
