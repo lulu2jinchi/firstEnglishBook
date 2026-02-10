@@ -358,58 +358,40 @@ type ReaderFont = {
 
 const themeOptions: ReaderTheme[] = [
   {
-    id: "original",
-    label: "Original",
-    background: "#fff8dc",
+    id: "ash",
+    label: "浅灰",
+    background: "#f3f4f6",
     text: "#1f2937",
     panel: "#ffffff",
-    border: "#e4d3a4",
-    muted: "#a8742f",
+    border: "#d8dde3",
+    muted: "#6b7280",
   },
   {
-    id: "paper",
-    label: "Paper",
-    background: "#f6f2e8",
-    text: "#1f2937",
-    panel: "#ffffff",
-    border: "#e6dcc5",
-    muted: "#8c7a5b",
+    id: "beige",
+    label: "米色",
+    background: "#efe9d8",
+    text: "#3e3120",
+    panel: "#f5efdf",
+    border: "#e1d5bc",
+    muted: "#8a7352",
   },
   {
-    id: "focus",
-    label: "Focus",
-    background: "#fbf5e9",
-    text: "#27272a",
-    panel: "#ffffff",
-    border: "#eadfc9",
-    muted: "#a08f7a",
+    id: "mint",
+    label: "浅绿",
+    background: "#c9e7c9",
+    text: "#1f3523",
+    panel: "#d6edd5",
+    border: "#add4ad",
+    muted: "#487550",
   },
   {
-    id: "calm",
-    label: "Calm",
-    background: "#f1e6d2",
-    text: "#3a2f21",
-    panel: "#ffffff",
-    border: "#dbc7a9",
-    muted: "#9b7d52",
-  },
-  {
-    id: "sepia",
-    label: "Sepia",
-    background: "#f3e0c2",
-    text: "#3f2d20",
-    panel: "#ffffff",
-    border: "#d9bea0",
-    muted: "#a07245",
-  },
-  {
-    id: "quiet",
-    label: "Quiet",
-    background: "#2b2b2b",
-    text: "#f5f2e8",
-    panel: "#3a3a3a",
-    border: "#4b4b4b",
-    muted: "#b9afa3",
+    id: "night",
+    label: "夜间",
+    background: "#0b0d11",
+    text: "#e8eef8",
+    panel: "#151922",
+    border: "#2a3242",
+    muted: "#87b7ff",
   },
 ];
 
@@ -1081,7 +1063,7 @@ applyMeaningFontSize(meaningFontSize.value, false);
 }
 
 .theme-card.active {
-  outline:1px solid var(--reader-text, #1f2937);
+  outline: 2px solid #3498ff;
   outline-offset: -1px;
 }
 

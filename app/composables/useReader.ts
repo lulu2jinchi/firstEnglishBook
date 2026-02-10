@@ -622,6 +622,9 @@ export function useReader(
     background: '#fff8dc',
     text: '#1f2937'
   })
+  const tooltipBackgroundColor = ref('rgba(17, 24, 39, 0.95)')
+  const tooltipTextColor = ref('#f8fafc')
+  const tooltipBorderColor = ref('rgba(148, 163, 184, 0.3)')
   const readerFontFamily = ref('"Georgia", "Times New Roman", serif')
   const readerFontSize = ref(DEFAULT_READER_FONT_SIZE)
   const readerLineHeight = ref(DEFAULT_READER_LINE_HEIGHT)
@@ -1103,6 +1106,11 @@ export function useReader(
 
   const setReaderTheme = (theme: ReaderThemeConfig) => {
     readerTheme.value = theme
+    syncTooltipPalette(theme)
+    const topDoc = getTopWindow()?.document
+    if (topDoc) {
+      ensureTooltipStyles(topDoc)
+    }
     applyTheme()
   }
 
@@ -1537,6 +1545,53 @@ export function useReader(
     return window.top || window
   }
 
+  const parseHexToRgb = (color: string) => {
+    const value = color.trim().replace('#', '')
+    if (!value) return null
+    if (value.length === 3) {
+      const expanded = value
+        .split('')
+        .map((ch) => ch + ch)
+        .join('')
+      const parsed = Number.parseInt(expanded, 16)
+      if (Number.isNaN(parsed)) return null
+      return {
+        r: (parsed >> 16) & 255,
+        g: (parsed >> 8) & 255,
+        b: parsed & 255
+      }
+    }
+    if (value.length === 6) {
+      const parsed = Number.parseInt(value, 16)
+      if (Number.isNaN(parsed)) return null
+      return {
+        r: (parsed >> 16) & 255,
+        g: (parsed >> 8) & 255,
+        b: parsed & 255
+      }
+    }
+    return null
+  }
+
+  const isDarkBackgroundColor = (color: string) => {
+    const rgb = parseHexToRgb(color)
+    if (!rgb) return false
+    const luminance = (0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b) / 255
+    return luminance < 0.42
+  }
+
+  const syncTooltipPalette = (theme: ReaderThemeConfig) => {
+    if (isDarkBackgroundColor(theme.background)) {
+      tooltipBackgroundColor.value = 'rgba(241, 245, 249, 0.96)'
+      tooltipTextColor.value = '#0f172a'
+      tooltipBorderColor.value = 'rgba(148, 163, 184, 0.5)'
+      return
+    }
+    tooltipBackgroundColor.value = 'rgba(17, 24, 39, 0.95)'
+    tooltipTextColor.value = '#f8fafc'
+    tooltipBorderColor.value = 'rgba(148, 163, 184, 0.3)'
+  }
+
   const buildTooltipStyles = () => {
     return [
       '.reader-meaning-tooltip {',
@@ -1544,8 +1599,9 @@ export function useReader(
       '  z-index: 9999;',
       '  max-width: 280px;',
       '  padding: 8px 10px;',
-      '  background: rgba(17, 24, 39, 0.95);',
-      '  color: #f8fafc;',
+      `  background: ${tooltipBackgroundColor.value};`,
+      `  color: ${tooltipTextColor.value};`,
+      `  border: 1px solid ${tooltipBorderColor.value};`,
       `  font-size: ${meaningFontSize.value}px;`,
       '  line-height: 1.4;',
       '  border-radius: 8px;',
@@ -1570,6 +1626,8 @@ export function useReader(
     }
     styleEl.textContent = buildTooltipStyles()
   }
+
+  syncTooltipPalette(readerTheme.value)
 
   const attachTooltipDismissHandler = (doc: Document) => {
     if (tooltipDismissHandlers.has(doc)) return
