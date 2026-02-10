@@ -868,12 +868,18 @@ export function useReader(
         'line-height': lineHeight
       }
     })
-    const overrideCss = [
-      `body, body * { font-family: ${fontFamily} !important; }`,
-      `body, body * { font-size: ${fontSize} !important; }`,
-      `body, body * { line-height: ${lineHeight} !important; }`
-    ].join('\n')
-    rendition.themes.registerCss('reader-overrides', overrideCss)
+    rendition.themes.register('reader-overrides', {
+      body: {
+        'font-family': `${fontFamily} !important`,
+        'font-size': `${fontSize} !important`,
+        'line-height': `${lineHeight} !important`
+      },
+      'body *': {
+        'font-family': `${fontFamily} !important`,
+        'font-size': `${fontSize} !important`,
+        'line-height': `${lineHeight} !important`
+      }
+    })
     rendition.themes.select('reader-overrides')
   }
 

@@ -102,6 +102,7 @@ const coverStates = ref<Record<string, string | null>>({})
 const loadingCovers = new Set<string>()
 
 const baseBooks: RawBook[] = [
+  { file: 'book/Hold Me Tight Seven Conversations For A Lifetime Of Love (Dr. Sue Johnson) (Z-Library).epub' },
   { file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
   { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
   { file: 'book/oz.epub' },
