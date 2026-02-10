@@ -7,7 +7,9 @@
     "dev": "nuxt dev",
     "generate": "nuxt generate",
     "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
+    "postinstall": "nuxt prepare",
+    "test:case:generate": "node scripts/test-system/generate-test-case.mjs",
+    "test:cases:run": "node --experimental-strip-types scripts/test-system/run-test-cases.mjs"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.6.11",

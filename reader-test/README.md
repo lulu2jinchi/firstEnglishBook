@@ -1,0 +1,79 @@
+# reader-test
+
+这是阅读器项目的测试工程目录，包含两类内容：
+
+- `test-cases/`：测试用例目录，每个用例包含 `test.md`（说明）和 `test.ts`（自动化脚本）。
+- `test-cases-runs/`：测试执行结果目录，每次执行会按时间创建子目录并生成 `report.md`。
+
+## 目录结构
+
+```text
+reader-test/
+  test-cases/
+    should-return-meaning-json/
+      test.md
+      test.ts
+  test-cases-runs/
+```
+
+## 用例脚本约定（test.ts）
+
+`test.ts` 默认导出一个对象，字段如下：
+
+- `name`: 用例名称
+- `endpoint`: 接口路径（如 `/api/querySentenceDefination`）
+- `method`: `GET|POST|PUT|PATCH|DELETE`
+- `headers`: 可选请求头对象
+- `query`: 可选 query 参数对象
+- `body`: 可选请求体
+- `timeoutMs`: 请求超时（毫秒）
+- `assertions`: 断言数组
+
+支持断言类型：
+
+- `status`
+- `json-path-exists`
+- `json-equals`
+- `json-type`
+- `json-array-min-length`
+- `json-has-keys`
+- `json-keys-exact`
+- `json-regex`
+- `response-time-max-ms`
+
+## 命令
+
+1. AI 生成测试用例（`test.md` + `test.ts`）
+
+```bash
+npm run test:case:generate -- --goal "验证接口返回可解析 JSON，且包含 sentence 与 meaning 字段"
+```
+
+可选参数：
+
+- `--slug`：指定用例目录名
+- `--endpoint`：指定目标接口，默认 `/api/querySentenceDefination`
+- `--text`：指定测试文本
+- `--model`：指定模型名
+- `--base-url`：模型 API 地址（默认硅基流动 OpenAI 兼容地址）
+- `--api-key`：模型 API Key
+
+说明：如果 AI 生成失败，会自动回退到本地模板，确保产物可用。
+
+2. 执行所有测试并生成报告
+
+```bash
+npm run test:cases:run -- --base-url http://localhost:3000
+```
+
+可选参数：
+
+- `--case <slug>`：只跑某一个用例
+- `--dry-run`：只校验用例结构，不发请求
+- `--run-id`：指定运行目录名
+
+执行完成后会生成：
+
+```text
+reader-test/test-cases-runs/<run-id>/report.md
+```

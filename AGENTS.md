@@ -16,6 +16,12 @@ Always use Chinese to response.
 - server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - server/assets/prompt.md：部署环境使用的 prompt 模板。
+- scripts/test-system/generate-test-case.mjs：AI 生成测试用例描述（test.md）与自动化脚本（test.ts）。
+- scripts/test-system/run-test-cases.mjs：执行 `reader-test/test-cases` 下用例并生成 `report.md`。
+- reader-test/README.md：测试工程说明与命令使用方式。
+- reader-test/test-cases/*/test.md：单用例说明文档（AI 可生成）。
+- reader-test/test-cases/*/test.ts：单用例自动化脚本（AI 可生成）。
+- reader-test/test-cases-runs/<run-id>/report.md：每次执行后的测试报告。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
 
 API 测试（curl）：
