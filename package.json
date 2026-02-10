@@ -14,7 +14,7 @@
   "dependencies": {
     "@floating-ui/dom": "^1.6.11",
     "dexie": "^3.2.7",
-    "epubjs": "^0.3.93",
+    "epubjs": "file:vendor/epubjs",
     "nuxt": "^4.2.1",
     "vue": "^3.5.25",
     "vue-router": "^4.6.3",

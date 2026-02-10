@@ -77,3 +77,14 @@ npm run test:cases:run -- --base-url http://localhost:3000
 ```text
 reader-test/test-cases-runs/<run-id>/report.md
 ```
+
+## 手工回归项（UI）
+
+当前 `reader-test` 自动化主要覆盖接口层。针对阅读器滚动稳定性问题，新增以下手工回归基线：
+
+- 目标页面：`/epub-native-test`
+- 场景：移动端模式下，连续快速上滑并跨章节滚动
+- 关注点：
+  - 是否出现阅读位置跳变
+  - 是否出现正文闪烁
+- 补丁说明参考：`vendor/epubjs/LOCAL_PATCHES.md`

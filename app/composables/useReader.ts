@@ -7,7 +7,11 @@ import {
   DEFAULT_READER_LINE_HEIGHT
 } from '~/constants/readerPreferences'
 
-type ReadingMode = 'paginated' | 'scrolled-continuous'
+type ReadingMode = 'paginated' | 'scrolled-continuous' | 'scrolled-doc'
+
+type UseReaderOptions = {
+  useExperimentalContinuousScroll?: ComputedRef<boolean> | Ref<boolean>
+}
 
 type ReaderThemeConfig = {
   background: string
@@ -178,6 +182,13 @@ const nonNameWhitelist = new Set<string>([
   'english'
 ])
 let cocaRankMapPromise: Promise<Map<string, number>> | null = null
+let serverVocabularySizePromise: Promise<number | null> | null = null
+let cachedServerVocabularySize: number | null = null
+let hasLoadedServerVocabularySize = false
+
+type ReaderLevelResponse = {
+  vocabularySize?: number | string | null
+}
 
 const ensureReaderDefinitionDb = () => {
   if (readerDefinitionDb) return readerDefinitionDb
@@ -199,6 +210,42 @@ const readVocabularySizeFromStorage = (): number | null => {
   } catch {
     return null
   }
+}
+
+const parseVocabularySize = (raw: unknown) => {
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed)) return null
+  const rounded = Math.round(parsed)
+  if (rounded < minVocabularySize || rounded > maxVocabularySize) return null
+  return rounded
+}
+
+const readVocabularySizeFromServer = async (): Promise<number | null> => {
+  if (hasLoadedServerVocabularySize) return cachedServerVocabularySize
+  if (serverVocabularySizePromise) return serverVocabularySizePromise
+
+  serverVocabularySizePromise = fetch('/api/readerLevel', {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json'
+    }
+  })
+    .then(async (response) => {
+      if (!response.ok) return null
+      const parsed = (await response.json()) as ReaderLevelResponse
+      return parseVocabularySize(parsed?.vocabularySize)
+    })
+    .catch(() => null)
+    .finally(() => {
+      serverVocabularySizePromise = null
+    })
+
+  const resolved = await serverVocabularySizePromise
+  if (resolved !== null) {
+    cachedServerVocabularySize = resolved
+    hasLoadedServerVocabularySize = true
+  }
+  return resolved
 }
 
 const normalizeWordKey = (word: string) =>
@@ -320,6 +367,13 @@ const normalizeVocabularyThreshold = (value: number | null) => {
   if (!Number.isFinite(value)) return fallbackVocabularySize
   const rounded = Math.round(Number(value))
   return Math.max(minVocabularySize, Math.min(maxVocabularySize, rounded))
+}
+
+const resolveVocabularyThreshold = async () => {
+  const localValue = readVocabularySizeFromStorage()
+  if (localValue !== null) return normalizeVocabularyThreshold(localValue)
+  const serverValue = await readVocabularySizeFromServer()
+  return normalizeVocabularyThreshold(serverValue)
 }
 
 const buildDefinitionConfigSignature = (threshold: number) =>
@@ -497,12 +551,22 @@ const saveReaderLocation = async (bookKey: string, cfi?: string | null) => {
 
 export function useReader(
   viewerEl: Ref<HTMLElement | null>,
-  bookPath: ComputedRef<string | null>
+  bookPath: ComputedRef<string | null>,
+  options: UseReaderOptions = {}
 ) {
   const isLoading = ref(true)
   const currentLocation = ref('—')
   const progressText = ref('0%')
-  const readingMode = ref<ReadingMode>('scrolled-continuous')
+  const useExperimentalContinuousScroll = computed(
+    () => Boolean(options.useExperimentalContinuousScroll?.value)
+  )
+  const continuousModeSupported = ref(true)
+  const preferredScrolledMode = computed<ReadingMode>(() =>
+    useExperimentalContinuousScroll.value && continuousModeSupported.value
+      ? 'scrolled-continuous'
+      : 'scrolled-doc'
+  )
+  const readingMode = ref<ReadingMode>(preferredScrolledMode.value)
   const isPaginated = computed(() => readingMode.value === 'paginated')
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
@@ -530,11 +594,22 @@ export function useReader(
   const shortBatchMaxItems = 3
   const batchRetryMaxAttempts = 3
   const requestIntervalMs = 1000
+  const progressSettleMs = 160
+  const progressSettleRequiredStableChecks = 2
+  const progressSettleMaxAttempts = 8
+  const saveLocationDebounceMs = 600
   const batchParagraphSeparator = '\n\n<<<__PARA_SPLIT__>>>\n\n'
   const maxBackoffMs = 120000
   let queueRunning = false
   let nextAllowedAt = 0
   let backoffMs = 0
+  let lastScrollInteractionAt = 0
+  let progressSettleTimer: ReturnType<typeof setTimeout> | null = null
+  let progressSettleToken = 0
+  let saveLocationTimer: ReturnType<typeof setTimeout> | null = null
+  let lastCommittedCfi = ''
+  let lastCommittedPercent = 0
+  let lastCommittedBookKey = ''
   const apiErrorMessage = ref('')
   const apiErrorVisible = ref(false)
   let apiErrorTimer: ReturnType<typeof setTimeout> | null = null
@@ -548,6 +623,40 @@ export function useReader(
   const readerLineHeight = ref(DEFAULT_READER_LINE_HEIGHT)
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const clearProgressSettleTimer = () => {
+    if (progressSettleTimer) {
+      clearTimeout(progressSettleTimer)
+      progressSettleTimer = null
+    }
+  }
+
+  const resetProgressSettleState = () => {
+    progressSettleToken += 1
+    clearProgressSettleTimer()
+  }
+
+  const clearSaveLocationTimer = () => {
+    if (saveLocationTimer) {
+      clearTimeout(saveLocationTimer)
+      saveLocationTimer = null
+    }
+  }
+
+  const scheduleSaveLocation = (cfi: string, targetBookKey: string) => {
+    if (!cfi || !targetBookKey) return
+    clearSaveLocationTimer()
+    saveLocationTimer = setTimeout(() => {
+      void saveReaderLocation(targetBookKey, cfi)
+      saveLocationTimer = null
+    }, saveLocationDebounceMs)
+  }
+
+  const flushSavedLocation = () => {
+    clearSaveLocationTimer()
+    if (!lastCommittedCfi || !lastCommittedBookKey) return
+    void saveReaderLocation(lastCommittedBookKey, lastCommittedCfi)
+  }
 
   const isRateLimitError = (status?: number, body?: string) => {
     if (status === 429) return true
@@ -701,6 +810,10 @@ export function useReader(
   }
 
   onMounted(async () => {
+    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+      const coarsePointer = window.matchMedia('(pointer: coarse)')
+      continuousModeSupported.value = !coarsePointer.matches
+    }
     attachTooltipPageLeaveHandlers()
     if (!encodedBookPath.value) {
       isLoading.value = false
@@ -713,6 +826,8 @@ export function useReader(
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
     }
+    resetProgressSettleState()
+    flushSavedLocation()
     clearApiError()
     removeTooltipPageLeaveHandlers()
     hideTooltip()
@@ -720,6 +835,7 @@ export function useReader(
     if (topDoc) {
       removeTooltipDismissHandler(topDoc)
     }
+    rendition?.off?.('relocated', handleRelocated)
     rendition?.destroy?.()
     book?.destroy?.()
   })
@@ -734,12 +850,33 @@ export function useReader(
     isLoading.value = false
   })
 
+  watch(preferredScrolledMode, async (nextMode, prevMode) => {
+    if (nextMode === prevMode) return
+    if (readingMode.value === 'paginated') return
+    readingMode.value = nextMode
+    if (!rendition) return
+
+    const currentCfi = rendition.currentLocation()?.start?.cfi
+    isLoading.value = true
+    await buildRendition(nextMode, currentCfi)
+    if (locationsReady.value) {
+      commitProgress(rendition.currentLocation())
+    }
+    isLoading.value = false
+  })
+
   async function openBook() {
     if (!encodedBookPath.value) {
       isLoading.value = false
       return
     }
+    resetProgressSettleState()
+    flushSavedLocation()
+    lastCommittedCfi = ''
+    lastCommittedPercent = 0
+    lastCommittedBookKey = ''
     const ePub = await ensureLib()
+    rendition?.off?.('relocated', handleRelocated)
     rendition?.destroy?.()
     book?.destroy?.()
     paragraphDefinitionStatus.clear()
@@ -765,18 +902,18 @@ export function useReader(
     await book.locations.generate(1600)
     locationsReady.value = true
 
-    updateProgress(rendition.currentLocation())
+    commitProgress(rendition.currentLocation())
     isLoading.value = false
   }
 
   const toggleMode = async () => {
     if (!rendition) return
     const currentCfi = rendition.currentLocation()?.start?.cfi
-    readingMode.value = isPaginated.value ? 'scrolled-continuous' : 'paginated'
+    readingMode.value = isPaginated.value ? preferredScrolledMode.value : 'paginated'
     isLoading.value = true
     await buildRendition(readingMode.value, currentCfi)
     if (locationsReady.value) {
-      updateProgress(rendition.currentLocation())
+      commitProgress(rendition.currentLocation())
     }
     isLoading.value = false
   }
@@ -799,24 +936,102 @@ export function useReader(
     }
   }
 
-  function updateProgress(location: any) {
-    const startCfi = location?.start?.cfi ?? rendition?.currentLocation()?.start?.cfi
-    if (!startCfi || !book?.locations) {
-      currentLocation.value = '—'
-      progressText.value = '0%'
+  function resolveProgress(location: any) {
+    const startCfi = location?.start?.cfi
+    if (!startCfi || !book?.locations) return null
+
+    const percent = book.locations.percentageFromCfi(startCfi)
+    if (typeof percent !== 'number' || !Number.isFinite(percent) || percent < 0 || percent > 1) {
+      return null
+    }
+
+    const locationIndex = book.locations.locationFromCfi(startCfi)
+    if (typeof locationIndex !== 'number' || !Number.isFinite(locationIndex) || locationIndex < 0) {
+      return null
+    }
+
+    return {
+      cfi: startCfi,
+      percent,
+      locationIndex
+    }
+  }
+
+  function commitProgress(location: any) {
+    const resolved = resolveProgress(location)
+    if (!resolved) return
+
+    if (
+      resolved.cfi === lastCommittedCfi &&
+      Math.abs(resolved.percent - lastCommittedPercent) < 0.0001
+    ) {
       return
     }
-    console.log('当前阅读位置 CFI:', startCfi);
-    void saveReaderLocation(bookKey.value, startCfi)
 
-    const percent = book.locations.percentageFromCfi(startCfi) || 0
-    const locationIndex = book.locations.locationFromCfi(startCfi)
-    currentLocation.value = `第 ${locationIndex} / ${book.locations.total} 位置`
-    progressText.value = `${Math.round(percent * 100)}%`
+    const currentBookKey = bookKey.value
+    const total = book?.locations?.total
+    currentLocation.value = `第 ${resolved.locationIndex} / ${total} 位置`
+    progressText.value = `${Math.round(resolved.percent * 100)}%`
+
+    lastCommittedCfi = resolved.cfi
+    lastCommittedPercent = resolved.percent
+    lastCommittedBookKey = currentBookKey
+    scheduleSaveLocation(lastCommittedCfi, currentBookKey)
+  }
+
+  function handleRelocated(location: any) {
+    if (readingMode.value !== 'scrolled-continuous') {
+      resetProgressSettleState()
+      commitProgress(location)
+      return
+    }
+
+    progressSettleToken += 1
+    const currentToken = progressSettleToken
+
+    const scheduleContinuousCommit = (
+      fallbackLocation: any,
+      previousCfi: string,
+      stableChecks: number,
+      attempt: number
+    ) => {
+      clearProgressSettleTimer()
+      progressSettleTimer = setTimeout(() => {
+        if (currentToken !== progressSettleToken) {
+          progressSettleTimer = null
+          return
+        }
+
+        const latestLocation = rendition?.currentLocation?.() ?? fallbackLocation
+        const latestCfi = latestLocation?.start?.cfi ?? ''
+        const nextStableChecks =
+          latestCfi && previousCfi && latestCfi === previousCfi ? stableChecks + 1 : 0
+
+        if (
+          nextStableChecks >= progressSettleRequiredStableChecks ||
+          attempt >= progressSettleMaxAttempts
+        ) {
+          commitProgress(latestLocation)
+          progressSettleTimer = null
+          return
+        }
+
+        scheduleContinuousCommit(
+          latestLocation,
+          latestCfi || previousCfi,
+          nextStableChecks,
+          attempt + 1
+        )
+      }, progressSettleMs)
+    }
+
+    scheduleContinuousCommit(location, location?.start?.cfi ?? '', 0, 1)
   }
 
   async function buildRendition(mode: ReadingMode, startCfi?: string | null) {
-    rendition?.off?.('relocated', updateProgress)
+    resetProgressSettleState()
+    flushSavedLocation()
+    rendition?.off?.('relocated', handleRelocated)
     rendition?.destroy?.()
 
     const renderOptions: Record<string, any> = {
@@ -828,8 +1043,10 @@ export function useReader(
 
     if (mode === 'paginated') {
       renderOptions.spread = 'none'
-    } else {
+    } else if (mode === 'scrolled-continuous') {
       renderOptions.manager = 'continuous'
+    } else {
+      renderOptions.flow = 'scrolled-doc'
     }
 
     rendition = book.renderTo(viewerEl.value!, renderOptions)
@@ -837,7 +1054,7 @@ export function useReader(
     applyTheme()
     attachContentHooks()
     setupParentMessageHandler()
-    rendition.on('relocated', updateProgress)
+    rendition.on('relocated', handleRelocated)
     if (startCfi) {
       try {
         console.log('尝试恢复到保存的阅读位置 CFI:', startCfi);
@@ -981,6 +1198,7 @@ export function useReader(
         if (!scrollContainer) return
         if (scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) return
         if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+        lastScrollInteractionAt = Date.now()
         const now = Date.now()
         if (now - lastWheelFallbackAt < wheelFallbackCooldownMs) return
         lastWheelFallbackAt = now
@@ -1073,6 +1291,7 @@ export function useReader(
       }
 
       const handleScrollOrResize = () => {
+        lastScrollInteractionAt = Date.now()
         if (debounceTimer) {
           clearTimeout(debounceTimer)
         }
@@ -1114,6 +1333,21 @@ export function useReader(
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '')
     return `para-${safeSection || 'chapter'}-${index}`
+  }
+
+  const isParagraphVisibleInViewport = (doc: Document, paragraphEl: HTMLElement) => {
+    if (readingMode.value !== 'scrolled-continuous') return true
+    const frameEl = doc.defaultView?.frameElement as HTMLElement | null
+    const scrollContainer = (frameEl?.closest('.epub-container') as HTMLElement | null) || null
+    if (!frameEl || !scrollContainer) return true
+
+    const paragraphRect = paragraphEl.getBoundingClientRect()
+    const frameRect = frameEl.getBoundingClientRect()
+    const containerRect = scrollContainer.getBoundingClientRect()
+    const paragraphTop = frameRect.top + paragraphRect.top
+    const paragraphBottom = frameRect.top + paragraphRect.bottom
+
+    return paragraphBottom >= containerRect.top && paragraphTop <= containerRect.bottom
   }
 
   const escapeSelectorValue = (value: string) => {
@@ -1179,22 +1413,29 @@ export function useReader(
       const parent = textNode.parentNode
       if (!parent) return null
       const doc = textNode.ownerDocument
-      const span = doc.createElement('span')
-      span.dataset.meaningKey = meaningKey
-      span.dataset.rawWord = rawWord
-      span.textContent = matchText
+      const markerEl = doc.createElement('reader-meaning-token')
+      markerEl.dataset.meaningKey = meaningKey
+      markerEl.dataset.rawWord = rawWord
+      markerEl.textContent = matchText
+      markerEl.style.display = 'inline'
+      markerEl.style.float = 'none'
+      markerEl.style.clear = 'none'
+      markerEl.style.margin = '0'
+      markerEl.style.padding = '0'
+      markerEl.style.textIndent = '0'
+      markerEl.style.position = 'static'
 
       if (before) {
         parent.insertBefore(doc.createTextNode(before), textNode)
       }
-      parent.insertBefore(span, textNode)
+      parent.insertBefore(markerEl, textNode)
       let afterNode: Text | null = null
       if (after) {
         afterNode = doc.createTextNode(after)
         parent.insertBefore(afterNode, textNode)
       }
       parent.removeChild(textNode)
-      return { span, afterNode }
+      return { markerEl, afterNode }
     }
     const textNodes: Text[] = []
     const walker = paragraphEl.ownerDocument.createTreeWalker(paragraphEl, NodeFilter.SHOW_TEXT)
@@ -1208,7 +1449,7 @@ export function useReader(
     }
 
     let markerIndex = 0
-    const insertedSpans: HTMLSpanElement[] = []
+    const insertedMarkerEls: HTMLElement[] = []
 
     for (const initialNode of textNodes) {
       let nodeCursor: Text | null = initialNode
@@ -1224,7 +1465,7 @@ export function useReader(
         if (!wrapped) {
           break
         }
-        insertedSpans.push(wrapped.span)
+        insertedMarkerEls.push(wrapped.markerEl)
         markerIndex += 1
         nodeCursor = wrapped.afterNode
       }
@@ -1232,12 +1473,12 @@ export function useReader(
     }
 
     if (markerIndex !== markers.length) {
-      for (let i = insertedSpans.length - 1; i >= 0; i -= 1) {
-        const span = insertedSpans[i]
-        const parent = span.parentNode
+      for (let i = insertedMarkerEls.length - 1; i >= 0; i -= 1) {
+        const markerEl = insertedMarkerEls[i]
+        const parent = markerEl.parentNode
         if (!parent) continue
-        const textNode = span.ownerDocument.createTextNode(span.textContent || '')
-        parent.replaceChild(textNode, span)
+        const textNode = markerEl.ownerDocument.createTextNode(markerEl.textContent || '')
+        parent.replaceChild(textNode, markerEl)
         parent.normalize()
       }
       return {
@@ -1248,7 +1489,7 @@ export function useReader(
 
     return {
       success: true,
-      spanCount: insertedSpans.length
+      spanCount: insertedMarkerEls.length
     }
   }
 
@@ -1302,7 +1543,7 @@ export function useReader(
     if (tooltipDismissHandlers.has(doc)) return
     const handler = (event: MouseEvent) => {
       const target = event.target as Element | null
-      const clickedMeaning = target?.closest?.('span[data-meaning-key]')
+      const clickedMeaning = target?.closest?.('[data-meaning-key]')
       if (!clickedMeaning) {
         hideTooltip()
       }
@@ -1352,7 +1593,10 @@ export function useReader(
 
   const attachTooltipPageLeaveHandlers = () => {
     if (tooltipPageLeaveHandler || typeof window === 'undefined') return
-    tooltipPageLeaveHandler = () => hideTooltip()
+    tooltipPageLeaveHandler = () => {
+      hideTooltip()
+      flushSavedLocation()
+    }
     tooltipVisibilityHandler = () => {
       if (document.visibilityState === 'hidden') {
         hideTooltip()
@@ -1475,6 +1719,14 @@ export function useReader(
       return true
     }
 
+    if (!isParagraphVisibleInViewport(doc, paragraphEl)) {
+      return false
+    }
+
+    if (readingMode.value === 'scrolled-continuous' && Date.now() - lastScrollInteractionAt < 700) {
+      return false
+    }
+
     const meaningMap = normalizeMeaningMap(resp.meaning)
     attachTooltipDismissHandler(doc)
     const markerResult = applySentenceMarkersToParagraph(paragraphEl, resp.sentence)
@@ -1485,15 +1737,15 @@ export function useReader(
     }
 
     paragraphEl.dataset.annotated = 'true'
-    const spans = Array.from(paragraphEl.querySelectorAll<HTMLSpanElement>('span[data-meaning-key]'))
-    spans.forEach((span) => {
-      const meaningKey = normalizeWordKey(span.dataset.meaningKey || '')
-      span.style.textDecoration = 'underline'
-      span.style.cursor = 'pointer'
-      span.addEventListener('click', () => {
+    const markerEls = Array.from(paragraphEl.querySelectorAll<HTMLElement>('[data-meaning-key]'))
+    markerEls.forEach((markerEl) => {
+      const meaningKey = normalizeWordKey(markerEl.dataset.meaningKey || '')
+      markerEl.style.textDecoration = 'underline'
+      markerEl.style.cursor = 'pointer'
+      markerEl.addEventListener('click', () => {
         const meaning = meaningMap[meaningKey]
         if (meaning) {
-          void showTooltipForSpan(span, doc, meaning)
+          void showTooltipForSpan(markerEl, doc, meaning)
         } else {
           hideTooltip()
         }
@@ -1685,7 +1937,7 @@ export function useReader(
     const candidates: DefinitionCandidate[] = []
     const seenParagraphIds = new Set<string>()
     const currentBookKey = bookKey.value
-    const thresholdForCache = normalizeVocabularyThreshold(readVocabularySizeFromStorage())
+    const thresholdForCache = await resolveVocabularyThreshold()
     const definitionConfigSignature = buildDefinitionConfigSignature(thresholdForCache)
 
     for (const paragraph of paragraphs) {
@@ -1846,6 +2098,7 @@ export function useReader(
     readerFontFamily,
     readerFontSize,
     readerLineHeight,
+    continuousModeSupported,
     toggleMode,
     goPrev,
     goNext,
