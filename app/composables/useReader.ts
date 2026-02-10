@@ -1458,6 +1458,9 @@ export function useReader(
       markerEl.style.padding = '0'
       markerEl.style.textIndent = '0'
       markerEl.style.position = 'static'
+      markerEl.style.setProperty('-webkit-tap-highlight-color', 'transparent')
+      markerEl.style.backgroundColor = 'transparent'
+      markerEl.style.transition = 'none'
 
       if (before) {
         parent.insertBefore(doc.createTextNode(before), textNode)

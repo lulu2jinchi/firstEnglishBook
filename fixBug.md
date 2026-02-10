@@ -115,3 +115,25 @@
 - 切换到 `夜间` 主题后，点击单词，释义气泡为浅底深字。
 - 切回浅色主题后，释义气泡恢复深底浅字。
 - 执行 `npm run build`，编译通过。
+
+## 2026-02-10 点击单词出现背景闪烁
+
+### 现象
+
+- 点击段落中的可释义单词时，单词区域会出现一次背景闪烁，观感突兀。
+
+### 根因
+
+- 单词标记元素 `reader-meaning-token` 未显式禁用 WebKit 点击高亮，触发默认 tap highlight 视觉反馈。
+
+### 解决方案
+
+- 在 `app/composables/useReader.ts` 的单词标记创建逻辑中，补充样式：
+  - `-webkit-tap-highlight-color: transparent`
+  - `background-color: transparent`
+  - `transition: none`
+
+### 验证
+
+- 在阅读器中点击任意可释义单词，不再出现背景闪烁。
+- 执行 `npm run build`，编译通过。

@@ -6,6 +6,6 @@ export const DEFAULT_READER_LINE_HEIGHT = 1.6
 export const MIN_READER_LINE_HEIGHT = 1.2
 export const MAX_READER_LINE_HEIGHT = 2.2
 
-export const DEFAULT_MEANING_FONT_SIZE = 13
+export const DEFAULT_MEANING_FONT_SIZE = 14
 export const MIN_MEANING_FONT_SIZE = 11
 export const MAX_MEANING_FONT_SIZE = 22
