@@ -3,6 +3,7 @@ import { autoUpdate, computePosition, flip, offset, shift, size } from '@floatin
 import Dexie, { type Table } from 'dexie'
 import lemmatizer from 'wink-lemmatizer'
 import {
+  DEFAULT_MEANING_FONT_SIZE,
   DEFAULT_READER_FONT_SIZE,
   DEFAULT_READER_LINE_HEIGHT
 } from '~/constants/readerPreferences'
@@ -624,6 +625,7 @@ export function useReader(
   const readerFontFamily = ref('"Georgia", "Times New Roman", serif')
   const readerFontSize = ref(DEFAULT_READER_FONT_SIZE)
   const readerLineHeight = ref(DEFAULT_READER_LINE_HEIGHT)
+  const meaningFontSize = ref(DEFAULT_MEANING_FONT_SIZE)
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -1119,6 +1121,16 @@ export function useReader(
     applyTheme()
   }
 
+  const setMeaningFontSize = (fontSize: number) => {
+    meaningFontSize.value = fontSize
+    const topDoc = getTopWindow()?.document
+    if (!topDoc) return
+    ensureTooltipStyles(topDoc)
+    if (tooltipEl) {
+      tooltipEl.style.fontSize = `${meaningFontSize.value}px`
+    }
+  }
+
   /**
    * 为每个章节内容文档打标段落，并在 iframe 内部追踪可见段落。
    * 通过 postMessage 将可见段落同步给父页面。
@@ -1525,12 +1537,8 @@ export function useReader(
     return window.top || window
   }
 
-  const ensureTooltipStyles = (doc: Document) => {
-    const styleId = 'reader-meaning-tooltip-styles'
-    if (doc.getElementById(styleId)) return
-    const styleEl = doc.createElement('style')
-    styleEl.id = styleId
-    styleEl.textContent = [
+  const buildTooltipStyles = () => {
+    return [
       '.reader-meaning-tooltip {',
       '  position: fixed;',
       '  z-index: 9999;',
@@ -1538,7 +1546,7 @@ export function useReader(
       '  padding: 8px 10px;',
       '  background: rgba(17, 24, 39, 0.95);',
       '  color: #f8fafc;',
-      '  font-size: 13px;',
+      `  font-size: ${meaningFontSize.value}px;`,
       '  line-height: 1.4;',
       '  border-radius: 8px;',
       '  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);',
@@ -1550,7 +1558,17 @@ export function useReader(
       '  opacity: 1;',
       '}'
     ].join('\n')
-    doc.head.appendChild(styleEl)
+  }
+
+  const ensureTooltipStyles = (doc: Document) => {
+    const styleId = 'reader-meaning-tooltip-styles'
+    let styleEl = doc.getElementById(styleId) as HTMLStyleElement | null
+    if (!styleEl) {
+      styleEl = doc.createElement('style')
+      styleEl.id = styleId
+      doc.head.appendChild(styleEl)
+    }
+    styleEl.textContent = buildTooltipStyles()
   }
 
   const attachTooltipDismissHandler = (doc: Document) => {
@@ -2109,9 +2127,11 @@ export function useReader(
     setReaderFontFamily,
     setReaderFontSize,
     setReaderLineHeight,
+    setMeaningFontSize,
     readerFontFamily,
     readerFontSize,
     readerLineHeight,
+    meaningFontSize,
     continuousModeSupported,
     toggleMode,
     goPrev,

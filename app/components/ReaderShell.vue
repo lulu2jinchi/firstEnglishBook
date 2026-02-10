@@ -159,6 +159,15 @@
             </div>
           </div>
 
+          <div class="type-section">
+            <div class="type-label">释义字号</div>
+            <div class="stepper">
+              <button type="button" @click="bumpMeaningFontSize(-1)">A-</button>
+              <span class="stepper-value">{{ meaningFontSize }}px</span>
+              <button type="button" @click="bumpMeaningFontSize(1)">A+</button>
+            </div>
+          </div>
+
         </div>
       </section>
     </div>
@@ -172,10 +181,13 @@ import { useRoute } from "vue-router";
 import Dexie, { type Table } from "dexie";
 import { useReader } from "~/composables/useReader";
 import {
+  DEFAULT_MEANING_FONT_SIZE,
   DEFAULT_READER_FONT_SIZE,
   DEFAULT_READER_LINE_HEIGHT,
+  MAX_MEANING_FONT_SIZE,
   MAX_READER_FONT_SIZE,
   MAX_READER_LINE_HEIGHT,
+  MIN_MEANING_FONT_SIZE,
   MIN_READER_FONT_SIZE,
   MIN_READER_LINE_HEIGHT,
 } from "~/constants/readerPreferences";
@@ -305,6 +317,8 @@ const {
   setReaderFontFamily,
   setReaderFontSize,
   setReaderLineHeight,
+  setMeaningFontSize,
+  meaningFontSize: initialMeaningFontSize,
   toggleMode,
   goPrev,
   goNext,
@@ -428,10 +442,13 @@ const readerThemeStorageKey = "first-english-book-reader-theme";
 const readerFontStorageKey = "first-english-book-reader-font";
 const readerFontSizeStorageKey = "first-english-book-reader-font-size";
 const readerLineHeightStorageKey = "first-english-book-reader-line-height";
+const meaningFontSizeStorageKey = "first-english-book-meaning-font-size";
 const minFontSize = MIN_READER_FONT_SIZE;
 const maxFontSize = MAX_READER_FONT_SIZE;
 const minLineHeight = MIN_READER_LINE_HEIGHT;
 const maxLineHeight = MAX_READER_LINE_HEIGHT;
+const minMeaningFontSize = MIN_MEANING_FONT_SIZE;
+const maxMeaningFontSize = MAX_MEANING_FONT_SIZE;
 
 const getStorageValue = (key: string) => {
   if (typeof window === "undefined") return null;
@@ -486,6 +503,16 @@ const lineHeight = ref(
     parseStoredNumber(getStorageValue(readerLineHeightStorageKey), DEFAULT_READER_LINE_HEIGHT),
     minLineHeight,
     maxLineHeight
+  )
+);
+const meaningFontSize = ref(
+  clampNumber(
+    parseStoredNumber(
+      getStorageValue(meaningFontSizeStorageKey),
+      initialMeaningFontSize.value || DEFAULT_MEANING_FONT_SIZE
+    ),
+    minMeaningFontSize,
+    maxMeaningFontSize
   )
 );
 
@@ -566,6 +593,19 @@ const bumpFontSize = (delta: number) => {
 
 const bumpLineHeight = (delta: number) => {
   applyLineHeight(lineHeight.value + delta);
+};
+
+const applyMeaningFontSize = (value: number, persist = true) => {
+  const next = clampNumber(value, minMeaningFontSize, maxMeaningFontSize);
+  meaningFontSize.value = next;
+  setMeaningFontSize(next);
+  if (persist) {
+    setStorageValue(meaningFontSizeStorageKey, String(next));
+  }
+};
+
+const bumpMeaningFontSize = (delta: number) => {
+  applyMeaningFontSize(meaningFontSize.value + delta);
 };
 
 const flattenToc = (items: TocItem[], depth = 0, acc: FlatTocItem[] = []) => {
@@ -652,6 +692,7 @@ selectTheme(activeThemeId.value, false);
 selectFont(activeFontId.value, false);
 applyFontSize(fontSize.value, false);
 applyLineHeight(lineHeight.value, false);
+applyMeaningFontSize(meaningFontSize.value, false);
 </script>
 
 <style scoped>
