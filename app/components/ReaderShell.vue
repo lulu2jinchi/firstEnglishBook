@@ -159,31 +159,6 @@
             </div>
           </div>
 
-          <div class="type-section">
-            <div class="type-label">滚动引擎</div>
-            <div class="mode-chip-group">
-              <button
-                type="button"
-                class="mode-chip"
-                :class="{ active: !experimentalContinuousEffective }"
-                @click="setExperimentalContinuousScroll(false)"
-              >
-                稳定模式
-              </button>
-              <button
-                type="button"
-                class="mode-chip"
-                :class="{ active: experimentalContinuousEffective }"
-                :disabled="!continuousModeSupported"
-                @click="setExperimentalContinuousScroll(true)"
-              >
-                实验性连续滚动
-              </button>
-            </div>
-            <div v-if="!continuousModeSupported" class="mode-hint">
-              当前设备为触屏模式，已强制使用稳定模式以避免跨章节跳变。
-            </div>
-          </div>
         </div>
       </section>
     </div>
@@ -304,10 +279,6 @@ const syncExperimentalContinuousFromRoute = () => {
   experimentalContinuousScroll.value = fromQuery;
 };
 
-const setExperimentalContinuousScroll = (enabled: boolean) => {
-  experimentalContinuousScroll.value = enabled;
-};
-
 watch(
   () => route.query,
   () => {
@@ -338,14 +309,9 @@ const {
   goPrev,
   goNext,
   goToHref,
-  continuousModeSupported,
 } = useReader(viewerEl, computed(() => bookPath.value), {
   useExperimentalContinuousScroll: computed(() => experimentalContinuousScroll.value),
 });
-
-const experimentalContinuousEffective = computed(
-  () => experimentalContinuousScroll.value && continuousModeSupported.value
-);
 
 type TocItem = {
   label?: string;
@@ -1157,38 +1123,6 @@ applyLineHeight(lineHeight.value, false);
 .stepper-value {
   font-weight: 600;
   font-size: 14px;
-}
-
-.mode-chip-group {
-  display: flex;
-  gap: 8px;
-}
-
-.mode-chip {
-  border: 1px solid var(--reader-border, #e5e7eb);
-  border-radius: 999px;
-  padding: 6px 12px;
-  background: color-mix(in srgb, var(--reader-bg, #fff8dc) 82%, transparent);
-  color: var(--reader-text, #1f2937);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
-}
-
-.mode-chip.active {
-  background: color-mix(in srgb, var(--reader-muted, #a8742f) 22%, #ffffff);
-  border-color: var(--reader-muted, #a8742f);
-  font-weight: 600;
-}
-
-.mode-chip:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.mode-hint {
-  font-size: 12px;
-  color: var(--reader-muted, #6b7280);
 }
 
 @media (max-width: 720px) {
