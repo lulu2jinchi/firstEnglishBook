@@ -88,3 +88,15 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 是否出现阅读位置跳变
   - 是否出现正文闪烁
 - 补丁说明参考：`vendor/epubjs/LOCAL_PATCHES.md`
+
+- 目标页面：`/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`
+- 场景：默认参数（不带 `experimentalContinuous`）直接进入阅读
+- 关注点：
+  - 默认应进入连续滚动（不是单章节稳定模式）
+  - 上下滚动时应持续加载前后章节
+
+- 目标页面：`/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`
+- 场景：实验性连续滚动下停滚后观察释义
+- 关注点：
+  - 停留一段时间后可见段落应出现可点击单词释义
+  - 跨章节上滑停下后不应出现明显回弹跳变

@@ -32,11 +32,12 @@ This file records behavior fixes applied on top of upstream `epubjs@0.3.93`.
   drops stale callbacks with `scrolledRequestId`.
 - `update()` calls `view.show()` only when visibility is actually hidden.
 - Introduced delayed trim strategy via `scheduleTrim()`:
-  - hide offscreen views first
   - postpone `trim()` until scroll delta calms down
+- `trim()` now computes recycle range from currently visible views instead of
+  relying on `displayed()` only, so cleanup remains effective without forcing
+  offscreen views hidden during active scrolling.
 - Added timer cleanup in `destroy()` to avoid stale async callbacks.
 
 ### Files
 
 - `vendor/epubjs/src/managers/continuous/index.js`
-

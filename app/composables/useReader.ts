@@ -598,6 +598,9 @@ export function useReader(
   const progressSettleRequiredStableChecks = 2
   const progressSettleMaxAttempts = 8
   const saveLocationDebounceMs = 600
+  const continuousVisibleSyncDebounceMs = 1800
+  const continuousApplyIdleMs = 1500
+  const continuousMinVisibleRatio = 0.55
   const batchParagraphSeparator = '\n\n<<<__PARA_SPLIT__>>>\n\n'
   const maxBackoffMs = 120000
   let queueRunning = false
@@ -810,10 +813,6 @@ export function useReader(
   }
 
   onMounted(async () => {
-    if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-      const coarsePointer = window.matchMedia('(pointer: coarse)')
-      continuousModeSupported.value = !coarsePointer.matches
-    }
     attachTooltipPageLeaveHandlers()
     if (!encodedBookPath.value) {
       isLoading.value = false
@@ -1188,13 +1187,17 @@ export function useReader(
 
       const visibleMap = new Map<HTMLElement, { id: string; text: string; element: HTMLElement; visibleRatio: number }>()
       let lastPayloadKey = ''
+      const isContinuousMode = readingMode.value === 'scrolled-continuous'
+      const autoSyncVisibleParagraphs = true
 
       const scrollContainer: HTMLElement | null = win.frameElement?.closest('.epub-container') || null
       const wheelFallbackCooldownMs = 450
       let lastWheelFallbackAt = 0
 
       const handleWheelFallback = (event: WheelEvent) => {
-        if (readingMode.value !== 'scrolled-continuous') return
+        // Continuous manager now handles chapter boundary loading itself.
+        // Wheel fallback (prev/next) can introduce artificial jumps.
+        if (readingMode.value === 'scrolled-continuous') return
         if (!scrollContainer) return
         if (scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) return
         if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
@@ -1254,9 +1257,12 @@ export function useReader(
       }
 
       const postVisibleParagraphs = () => {
-        const visibleParas = Array.from(visibleMap.values()).sort((a, b) => {
+        const allVisibleParas = Array.from(visibleMap.values()).sort((a, b) => {
           return Number(a.element.dataset.paraIndex || 0) - Number(b.element.dataset.paraIndex || 0)
         })
+        const visibleParas = isContinuousMode
+          ? allVisibleParas.filter((item) => item.visibleRatio >= continuousMinVisibleRatio)
+          : allVisibleParas
 
         const payload = {
           type: 'epub-visible-paragraphs',
@@ -1285,6 +1291,10 @@ export function useReader(
 
       const runScrollOrResize = () => {
         hideTooltip()
+        if (!autoSyncVisibleParagraphs) return
+        if (isContinuousMode && Date.now() - lastScrollInteractionAt < continuousApplyIdleMs) {
+          return
+        }
         visibleMap.clear()
         getVisibleParagraphs().forEach((item) => visibleMap.set(item.element, item))
         postVisibleParagraphs()
@@ -1292,10 +1302,14 @@ export function useReader(
 
       const handleScrollOrResize = () => {
         lastScrollInteractionAt = Date.now()
+        if (!autoSyncVisibleParagraphs) return
         if (debounceTimer) {
           clearTimeout(debounceTimer)
         }
-        debounceTimer = setTimeout(runScrollOrResize, 1000)
+        debounceTimer = setTimeout(
+          runScrollOrResize,
+          isContinuousMode ? continuousVisibleSyncDebounceMs : 1000
+        )
       }
 
       // 内外层滚动/resize 都要监听，外层负责实际滚动可见区域
@@ -1723,7 +1737,7 @@ export function useReader(
       return false
     }
 
-    if (readingMode.value === 'scrolled-continuous' && Date.now() - lastScrollInteractionAt < 700) {
+    if (readingMode.value === 'scrolled-continuous' && Date.now() - lastScrollInteractionAt < continuousApplyIdleMs) {
       return false
     }
 

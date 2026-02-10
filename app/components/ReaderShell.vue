@@ -295,7 +295,7 @@ const parseExperimentalContinuousQuery = (value: unknown) => {
 };
 
 const experimentalContinuousScroll = ref(
-  parseExperimentalContinuousQuery(route.query.experimentalContinuous) ?? false
+  parseExperimentalContinuousQuery(route.query.experimentalContinuous) ?? true
 );
 
 const syncExperimentalContinuousFromRoute = () => {
