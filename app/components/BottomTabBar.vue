@@ -19,7 +19,7 @@
       :class="{ 'tab--active': active === 'user' }"
       @click="emit('user')"
     >
-      <i class="fa-regular fa-user tab-icon" aria-hidden="true"></i>
+      <i class="fa-solid fa-gear tab-icon" aria-hidden="true"></i>
     </button>
     <div class="home-indicator" aria-hidden="true" />
   </nav>
