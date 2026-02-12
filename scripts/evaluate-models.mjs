@@ -6,7 +6,7 @@ const INPUT_PATH = 'chooseAPI.md'
 const COCA_PATH = 'public/coca-20000.json'
 const OUTPUT_JSON_PATH = 'model_eval_results.json'
 const OUTPUT_XLSX_PATH = 'model_eval_results.xlsx'
-const ENDPOINT = 'https://api.siliconflow.cn/v1/chat/completions'
+const ENDPOINT = process.env.MODEL_EVAL_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions'
 const VOCAB_THRESHOLD = 6000
 const MODEL_TIMEOUT_MS = 120000
 

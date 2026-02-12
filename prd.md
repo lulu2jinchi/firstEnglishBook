@@ -1,5 +1,12 @@
 # 产品功能记录（增量）
 
+## 2026-02-12 模型服务切换到 OpenRouter
+
+- 阅读器释义后端配置切换为 `openrouter`，默认走 OpenRouter OpenAI 兼容接口。
+- 运行时新增 OpenRouter 配置项：`OPENROUTER_API_KEY`、`OPENROUTER_BASE_URL`、`OPENROUTER_MODEL`。
+- 后端请求支持 OpenRouter 推荐头：`HTTP-Referer` 与 `X-Title`（可通过环境变量配置）。
+- 测试用例生成脚本与评测脚本默认模型地址切换为 OpenRouter 端点。
+
 ## 2026-02-12 阅读进度恢复鲁棒性增强（快速退出场景）
 
 - 阅读进度锚点抓取升级为全局单链路，避免多 iframe 并发写入导致的进度覆盖。

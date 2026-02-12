@@ -14,7 +14,7 @@ Always use Chinese to response.
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件、段落释义请求队列与批处理）。
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
-- server/api/querySentenceDefination.post.ts：后端接口，调用硅基流模型生成词汇标注 JSON。
+- server/api/querySentenceDefination.post.ts：后端接口，调用 OpenRouter 模型生成词汇标注 JSON。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - server/assets/prompt.md：部署环境使用的 prompt 模板。
 - scripts/test-system/generate-test-case.mjs：AI 生成测试用例描述（test.md）与自动化脚本（test.ts）。
@@ -58,4 +58,3 @@ example output:
 - 解决过的 bug,和解决方案要同步更新到 fixBug.md
 - 每次有新功能新特性解决了新问题的时候，自动更新reader-test文件夹相关内容
 - 产品的功能要实时记录到 prd.md 文件中
-

@@ -202,10 +202,12 @@ export default defineEventHandler(async (event) => {
     } satisfies SentenceDefinitionResponse
   }
 
-  const { siliconflow } = useRuntimeConfig()
-  const apiKey = siliconflow.apiKey?.trim() || ''
-  const baseUrl = siliconflow.baseUrl?.trim() ? normalizeBaseUrl(siliconflow.baseUrl) : ''
-  const model = siliconflow.model?.trim() || ''
+  const { openrouter } = useRuntimeConfig()
+  const apiKey = openrouter.apiKey?.trim() || ''
+  const baseUrl = openrouter.baseUrl?.trim() ? normalizeBaseUrl(openrouter.baseUrl) : ''
+  const model = openrouter.model?.trim() || ''
+  const siteUrl = openrouter.siteUrl?.trim() || ''
+  const appName = openrouter.appName?.trim() || ''
 
   if (!apiKey) {
     throw createError({ statusCode: 500, statusMessage: '服务端未配置 API Key' })
@@ -232,12 +234,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: '读取 prompt.md 失败' })
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  }
+
+  if (siteUrl) {
+    headers['HTTP-Referer'] = siteUrl
+  }
+
+  if (appName) {
+    headers['X-Title'] = appName
+  }
+
   const response = await $fetch<ChatCompletionResponse>(`${baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
+    headers,
     body: {
       model,
       messages: buildMessages(prompt),

@@ -21,10 +21,12 @@ export default defineNuxtConfig({
     },
   },
   runtimeConfig: {
-    siliconflow: {
-      apiKey: process.env.SILICONFLOW_API_KEY,
-      baseUrl: process.env.SILICONFLOW_BASE_URL,
+    openrouter: {
+      apiKey: process.env.OPENROUTER_API_KEY,
+      baseUrl: "https://openrouter.ai/api/v1",
       model: "Qwen/Qwen3-14B",
+      siteUrl: "",
+      appName: "First English Book",
     },
   },
   nitro: {
