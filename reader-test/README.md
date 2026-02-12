@@ -139,3 +139,27 @@ reader-test/test-cases-runs/<run-id>/report.md
 - 关注点：
   - 点击可释义单词时，不应出现单词背景闪烁
   - 释义 tooltip 仍可正常弹出
+
+- 目标页面：`/reader?uploadId=<已上传书籍ID>`
+- 场景：检查上传书籍阅读进度恢复
+- 关注点：
+  - 进入上传书籍后滚动到中间位置，退出阅读页再进入同一本上传书籍
+  - 阅读位置应恢复到上次进度，不应回到开头
+
+- 目标页面：`/reader?uploadId=<已上传书籍ID>`
+- 场景：检查同章节内滚动后的精确恢复
+- 关注点：
+  - 在同一章节内滚动到新段落（不跨章节），退出阅读页再进入同一本上传书籍
+  - 重进后首屏可见段落应与退出前基本一致，不应回退到章节开头锚点
+
+- 目标页面：`/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`
+- 场景：检查内置书籍进度回退问题
+- 关注点：
+  - 连续滚动到中后段后退出并重进同一路由
+  - 重进后首屏文本应与退出前一致，不应跳回更早章节
+
+- 目标页面：`/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`
+- 场景：检查“快速退出”进度一致性
+- 关注点：
+  - 连续快速滚动后立即退出阅读页（不等待停滚防抖）
+  - 立刻重进同一路由后，首屏正文应与退出前保持一致

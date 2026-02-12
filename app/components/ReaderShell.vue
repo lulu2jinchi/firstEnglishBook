@@ -226,6 +226,7 @@ const ensureUploadBookDb = () => {
 
 const objectUrl = ref<string | null>(null);
 const bookPath = ref<string | null>(null);
+const storageBookKey = ref<string | null>(null);
 
 const clearObjectUrl = () => {
   if (objectUrl.value) {
@@ -244,6 +245,7 @@ const resolveBookPath = async () => {
     if (db) {
       const id = Number(uploadId);
       if (!Number.isNaN(id)) {
+        storageBookKey.value = `upload:${id}`;
         try {
           const record = await db.uploads.get(id);
           if (record?.blob) {
@@ -258,6 +260,7 @@ const resolveBookPath = async () => {
       }
     }
     bookPath.value = null;
+    storageBookKey.value = null;
     return;
   }
 
@@ -265,6 +268,7 @@ const resolveBookPath = async () => {
     typeof bookQuery === "string" && bookQuery.trim()
       ? bookQuery
       : "book/Normal People (Sally Rooney) (Z-Library).epub";
+  storageBookKey.value = null;
   if (/^(blob:|data:|https?:|file:)/i.test(raw)) {
     bookPath.value = raw;
     return;
@@ -325,6 +329,7 @@ const {
   goToHref,
 } = useReader(viewerEl, computed(() => bookPath.value), {
   useExperimentalContinuousScroll: computed(() => experimentalContinuousScroll.value),
+  storageBookKey: computed(() => storageBookKey.value),
 });
 
 type TocItem = {

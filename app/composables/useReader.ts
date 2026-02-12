@@ -12,6 +12,7 @@ type ReadingMode = 'paginated' | 'scrolled-continuous' | 'scrolled-doc'
 
 type UseReaderOptions = {
   useExperimentalContinuousScroll?: ComputedRef<boolean> | Ref<boolean>
+  storageBookKey?: ComputedRef<string | null> | Ref<string | null>
 }
 
 type ReaderThemeConfig = {
@@ -521,6 +522,12 @@ const buildBookKey = (path: string) => {
   return initials || 'book'
 }
 
+const normalizeStorageBookKey = (key: string | null | undefined) => {
+  if (typeof key !== 'string') return null
+  const trimmed = key.trim()
+  return trimmed || null
+}
+
 const loadSavedLocation = async (bookKey: string) => {
   const db = ensureReaderDefinitionDb()
   if (!db) return null
@@ -572,7 +579,8 @@ export function useReader(
   const modeButtonText = computed(() => (isPaginated.value ? '切换为上下滚动' : '切换为左右翻页'))
   const locationsReady = ref(false)
   const encodedBookPath = computed(() => (bookPath.value ? encodeURI(bookPath.value) : ''))
-  const bookKey = computed(() => buildBookKey(bookPath.value || 'book'))
+  const customStorageBookKey = computed(() => normalizeStorageBookKey(options.storageBookKey?.value))
+  const bookKey = computed(() => customStorageBookKey.value || buildBookKey(bookPath.value || 'book'))
 
   let book: any
   let rendition: any
@@ -584,6 +592,7 @@ export function useReader(
   const paragraphDocumentMap = new Map<string, Document>()
   const pendingDefinitionMap = new Map<string, SentenceDefinitionResponse>()
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
+  let documentContentsMap = new WeakMap<Document, any>()
   const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
   let tooltipEl: HTMLDivElement | null = null
   let tooltipCleanup: (() => void) | null = null
@@ -599,6 +608,7 @@ export function useReader(
   const progressSettleRequiredStableChecks = 2
   const progressSettleMaxAttempts = 8
   const saveLocationDebounceMs = 600
+  const progressCaptureDebounceMs = 220
   const continuousVisibleSyncDebounceMs = 1800
   const continuousApplyIdleMs = 1500
   const continuousMinVisibleRatio = 0.55
@@ -611,6 +621,11 @@ export function useReader(
   let progressSettleTimer: ReturnType<typeof setTimeout> | null = null
   let progressSettleToken = 0
   let saveLocationTimer: ReturnType<typeof setTimeout> | null = null
+  let progressCaptureTimer: ReturnType<typeof setTimeout> | null = null
+  let progressCaptureContainer: HTMLElement | null = null
+  let progressCaptureLastAt = 0
+  let progressCaptureScrollHandler: (() => void) | null = null
+  let suppressLocationPersistence = false
   let lastCommittedCfi = ''
   let lastCommittedPercent = 0
   let lastCommittedBookKey = ''
@@ -664,6 +679,154 @@ export function useReader(
     clearSaveLocationTimer()
     if (!lastCommittedCfi || !lastCommittedBookKey) return
     void saveReaderLocation(lastCommittedBookKey, lastCommittedCfi)
+  }
+
+  const clearProgressCaptureTimer = () => {
+    if (progressCaptureTimer) {
+      clearTimeout(progressCaptureTimer)
+      progressCaptureTimer = null
+    }
+  }
+
+  const captureGlobalVisibleAnchor = () => {
+    const root = viewerEl.value
+    if (!root) return
+    const frames = Array.from(root.querySelectorAll<HTMLIFrameElement>('.epub-view iframe'))
+    if (frames.length === 0) return
+
+    const normalizeText = (text: string) => text.replace(/\u00a0/g, ' ').trim()
+    const blockTags = new Set([
+      'ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'CANVAS', 'DIV', 'DL', 'FIELDSET', 'FIGCAPTION', 'FIGURE',
+      'FOOTER', 'FORM', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'HEADER', 'HR', 'LI', 'MAIN', 'NAV', 'NOSCRIPT', 'OL',
+      'P', 'PRE', 'SECTION', 'TABLE', 'UL'
+    ])
+    const hasBlockChild = (el: HTMLElement) => {
+      return Array.from(el.children).some((child) => blockTags.has(child.tagName))
+    }
+
+    const tryResolveCfiFromPoint = (doc: Document, frameRect: DOMRect, viewportY: number) => {
+      const contents = documentContentsMap.get(doc)
+      if (!contents?.section?.cfiFromRange) return ''
+      const localX = Math.max(1, Math.round(Math.min(40, frameRect.width / 2)))
+      const localY = Math.max(1, Math.round(viewportY - frameRect.top))
+      let range: Range | null = null
+      const webkitDoc = doc as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+      }
+      if (typeof webkitDoc.caretRangeFromPoint === 'function') {
+        range = webkitDoc.caretRangeFromPoint(localX, localY)
+      } else if (typeof webkitDoc.caretPositionFromPoint === 'function') {
+        const pos = webkitDoc.caretPositionFromPoint(localX, localY)
+        if (pos?.offsetNode) {
+          range = doc.createRange()
+          range.setStart(pos.offsetNode, pos.offset)
+          range.collapse(true)
+        }
+      }
+      if (!range) return ''
+      return contents.section.cfiFromRange(range) || ''
+    }
+
+    // 优先使用视口中上部的光标位置作为锚点，更贴近用户实际阅读焦点。
+    const focusViewportY = Math.round(window.innerHeight * 0.35)
+    const focusFrame = frames.find((frameEl) => {
+      const rect = frameEl.getBoundingClientRect()
+      return rect.top <= focusViewportY && rect.bottom >= focusViewportY
+    })
+    if (focusFrame?.contentDocument) {
+      const focusCfi = tryResolveCfiFromPoint(
+        focusFrame.contentDocument,
+        focusFrame.getBoundingClientRect(),
+        focusViewportY
+      )
+      if (focusCfi) {
+        commitProgressByCfi(focusCfi)
+        return
+      }
+    }
+
+    let best:
+      | {
+          doc: Document
+          element: HTMLElement
+          top: number
+          frameRect: DOMRect
+        }
+      | null = null
+
+    frames.forEach((frameEl) => {
+      const doc = frameEl.contentDocument
+      if (!doc) return
+      const frameRect = frameEl.getBoundingClientRect()
+      const anchors = Array.from(
+        doc.querySelectorAll<HTMLElement>('p, div, li, blockquote, h1, h2, h3, h4, h5, h6')
+      )
+      anchors.forEach((el) => {
+        if (el.tagName === 'DIV' && hasBlockChild(el)) return
+        const text = normalizeText(el.innerText || el.textContent || '')
+        if (!text) return
+        const rect = el.getBoundingClientRect()
+        const top = frameRect.top + rect.top
+        const bottom = frameRect.top + rect.bottom
+        if (bottom < 60 || top > window.innerHeight - 20) return
+        if (!best || top < best.top) {
+          best = {
+            doc,
+            element: el,
+            top,
+            frameRect
+          }
+        }
+      })
+    })
+
+    if (!best) return
+    const contents = documentContentsMap.get(best.doc)
+    if (!contents?.section?.cfiFromElement) return
+    try {
+      let anchorCfi = tryResolveCfiFromPoint(best.doc, best.frameRect, 64)
+      if (!anchorCfi) {
+        anchorCfi = contents.section.cfiFromElement(best.element) || ''
+      }
+      if (!anchorCfi) return
+      commitProgressByCfi(anchorCfi)
+    } catch {
+      // 忽略全局锚点提取失败
+    }
+  }
+
+  const detachProgressCapture = () => {
+    clearProgressCaptureTimer()
+    if (progressCaptureContainer && progressCaptureScrollHandler) {
+      progressCaptureContainer.removeEventListener('scroll', progressCaptureScrollHandler)
+    }
+    progressCaptureContainer = null
+    progressCaptureScrollHandler = null
+    progressCaptureLastAt = 0
+  }
+
+  const attachProgressCapture = () => {
+    detachProgressCapture()
+    const container = viewerEl.value?.querySelector<HTMLElement>('.epub-container')
+    if (!container) return
+    progressCaptureContainer = container
+    progressCaptureScrollHandler = () => {
+      const now = Date.now()
+      const elapsed = now - progressCaptureLastAt
+      if (elapsed >= progressCaptureDebounceMs) {
+        captureGlobalVisibleAnchor()
+        progressCaptureLastAt = now
+        return
+      }
+      clearProgressCaptureTimer()
+      progressCaptureTimer = setTimeout(() => {
+        captureGlobalVisibleAnchor()
+        progressCaptureLastAt = Date.now()
+        progressCaptureTimer = null
+      }, progressCaptureDebounceMs - elapsed)
+    }
+    container.addEventListener('scroll', progressCaptureScrollHandler, { passive: true })
   }
 
   const isRateLimitError = (status?: number, body?: string) => {
@@ -830,8 +993,10 @@ export function useReader(
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
     }
+    captureGlobalVisibleAnchor()
     resetProgressSettleState()
     flushSavedLocation()
+    detachProgressCapture()
     clearApiError()
     removeTooltipPageLeaveHandlers()
     hideTooltip()
@@ -874,6 +1039,7 @@ export function useReader(
       isLoading.value = false
       return
     }
+    captureGlobalVisibleAnchor()
     resetProgressSettleState()
     flushSavedLocation()
     lastCommittedCfi = ''
@@ -887,6 +1053,7 @@ export function useReader(
     paragraphDocumentMap.clear()
     pendingDefinitionMap.clear()
     documentParagraphIds = new WeakMap<Document, Set<string>>()
+    documentContentsMap = new WeakMap<Document, any>()
 
     const openOptions =
       bookPath.value && isEpubBlobUrl(bookPath.value) ? { openAs: 'epub' } : undefined
@@ -902,11 +1069,15 @@ export function useReader(
       tocItems.value = []
     }
     const savedCfi = await loadSavedLocation(bookKey.value)
-    await buildRendition(readingMode.value, savedCfi)
-    await book.locations.generate(1600)
-    locationsReady.value = true
-
-    commitProgress(rendition.currentLocation())
+    suppressLocationPersistence = Boolean(savedCfi)
+    try {
+      await buildRendition(readingMode.value, savedCfi)
+      await book.locations.generate(1600)
+      locationsReady.value = true
+      commitProgress(rendition.currentLocation())
+    } finally {
+      suppressLocationPersistence = false
+    }
     isLoading.value = false
   }
 
@@ -940,8 +1111,7 @@ export function useReader(
     }
   }
 
-  function resolveProgress(location: any) {
-    const startCfi = location?.start?.cfi
+  function resolveProgressByCfi(startCfi?: string | null) {
     if (!startCfi || !book?.locations) return null
 
     const percent = book.locations.percentageFromCfi(startCfi)
@@ -961,26 +1131,41 @@ export function useReader(
     }
   }
 
-  function commitProgress(location: any) {
-    const resolved = resolveProgress(location)
-    if (!resolved) return
+  function resolveProgress(location: any) {
+    const startCfi = location?.start?.cfi
+    return resolveProgressByCfi(startCfi)
+  }
 
-    if (
-      resolved.cfi === lastCommittedCfi &&
-      Math.abs(resolved.percent - lastCommittedPercent) < 0.0001
-    ) {
+  function commitProgressByCfi(cfi?: string | null) {
+    if (!cfi) return
+
+    const currentBookKey = bookKey.value
+    const resolved = resolveProgressByCfi(cfi)
+    const sameCfi = cfi === lastCommittedCfi
+    const sameBook = currentBookKey === lastCommittedBookKey
+
+    if (resolved) {
+      if (sameCfi && sameBook && Math.abs(resolved.percent - lastCommittedPercent) < 0.0001) {
+        return
+      }
+      const total = book?.locations?.total
+      currentLocation.value = `第 ${resolved.locationIndex} / ${total} 位置`
+      progressText.value = `${Math.round(resolved.percent * 100)}%`
+      lastCommittedPercent = resolved.percent
+    } else if (sameCfi && sameBook) {
       return
     }
 
-    const currentBookKey = bookKey.value
-    const total = book?.locations?.total
-    currentLocation.value = `第 ${resolved.locationIndex} / ${total} 位置`
-    progressText.value = `${Math.round(resolved.percent * 100)}%`
+    if (suppressLocationPersistence) return
 
-    lastCommittedCfi = resolved.cfi
-    lastCommittedPercent = resolved.percent
+    lastCommittedCfi = cfi
     lastCommittedBookKey = currentBookKey
     scheduleSaveLocation(lastCommittedCfi, currentBookKey)
+  }
+
+  function commitProgress(location: any) {
+    const startCfi = location?.start?.cfi
+    commitProgressByCfi(startCfi)
   }
 
   function handleRelocated(location: any) {
@@ -1033,8 +1218,10 @@ export function useReader(
   }
 
   async function buildRendition(mode: ReadingMode, startCfi?: string | null) {
+    captureGlobalVisibleAnchor()
     resetProgressSettleState()
     flushSavedLocation()
+    detachProgressCapture()
     rendition?.off?.('relocated', handleRelocated)
     rendition?.destroy?.()
 
@@ -1071,6 +1258,8 @@ export function useReader(
     } else {
       await rendition.display()
     }
+    attachProgressCapture()
+    captureGlobalVisibleAnchor()
   }
 
   function applyTheme() {
@@ -1150,6 +1339,7 @@ export function useReader(
       const doc: Document | null = contents?.document || null
       const win: any = contents?.window
       if (!doc || !win) return
+      documentContentsMap.set(doc, contents)
 
       const sectionIdentity = resolveSectionIdentity(contents, doc)
       const candidates = Array.from(doc.querySelectorAll('p, div')) as HTMLElement[]
@@ -1257,20 +1447,30 @@ export function useReader(
 
       const getVisibleParagraphs = () => {
         const { viewportTop, viewportBottom, precedingHeight } = getViewportData()
+        const computeVisibleEntry = (el: HTMLElement) => {
+          const rect = el.getBoundingClientRect()
+          const globalTop = precedingHeight + rect.top
+          const globalBottom = precedingHeight + rect.bottom
+          const intersects = globalBottom >= viewportTop && globalTop <= viewportBottom
+          if (!intersects) return null
+          const visibleHeight = Math.min(globalBottom, viewportBottom) - Math.max(globalTop, viewportTop)
+          const ratio = rect.height > 0 ? Math.max(0, Math.min(1, visibleHeight / rect.height)) : 0
+          return {
+            element: el,
+            globalTop,
+            visibleRatio: ratio
+          }
+        }
+
         return filteredParas
           .map((el) => {
-            const rect = el.getBoundingClientRect()
-            const globalTop = precedingHeight + rect.top
-            const globalBottom = precedingHeight + rect.bottom
-            const intersects = globalBottom >= viewportTop && globalTop <= viewportBottom
-            if (!intersects) return null
-            const visibleHeight = Math.min(globalBottom, viewportBottom) - Math.max(globalTop, viewportTop)
-            const ratio = rect.height > 0 ? Math.max(0, Math.min(1, visibleHeight / rect.height)) : 0
+            const entry = computeVisibleEntry(el)
+            if (!entry) return null
             return {
               id: el.dataset.paraId || '',
               text: (el.innerText || '').trim(),
               element: el,
-              visibleRatio: ratio
+              visibleRatio: entry.visibleRatio
             }
           })
           .filter(Boolean) as Array<{ id: string; text: string; element: HTMLElement; visibleRatio: number }>
@@ -1356,6 +1556,7 @@ export function useReader(
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
         removeTooltipDismissHandler(doc)
         removeDocumentParagraphs(doc)
+        documentContentsMap.delete(doc)
         visibleMap.clear()
       })
     })

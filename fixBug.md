@@ -1,5 +1,108 @@
 # Bug 修复记录
 
+## 2026-02-12 Hold Me Tight 快速退出场景仍有进度偏移（二次修复）
+
+### 现象
+
+- 在 `Hold Me Tight` 中快速连续滚动后立即退出，重进时偶发回到更早位置。
+- 尤其在多 iframe 可见或章节标题区，恢复位置容易与退出前首屏不一致。
+
+### 根因
+
+1. 进度抓取曾在多个内容文档内并行触发，存在“后写覆盖前写”的竞态。
+2. 重进加载阶段的自动 `commitProgress` 可能把已保存的精确 CFI 覆盖为粗粒度位置。
+3. 锚点仅取元素起点时，对标题/短块容忍度低，视觉恢复偏差较明显。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 改为单一“全局可见锚点”抓取链路：跨 iframe 统一计算当前可见阅读锚点，避免多文档互相覆盖。
+  - 恢复期禁写：当存在保存进度并执行恢复时，先只更新 UI，不立即写回存储，防止加载阶段反向覆盖。
+  - 锚点精度提升：优先使用 `cfiFromRange(视口中上部光标点)`，失败再回退 `cfiFromElement`。
+  - 仍保留 `relocated` 提交链路作为章节跳转兜底。
+
+### 验证
+
+- 快速滚动后立即退出再重进，`hmtscfal` 缓存 CFI 不再被加载阶段覆盖。
+- 在正文段落场景下，退出前后首屏文本保持一致。
+- 执行 `npm run build`，编译通过。
+
+## 2026-02-12 指定书籍（Hold Me Tight）退出重进进度回退
+
+### 现象
+
+- 访问 `/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`。
+- 滚动到中后段后退出并重进，阅读位置会回退到更早位置，和退出前不一致。
+
+### 根因
+
+1. 进度锚点提交放在“可见段落 ID 去重”之后，当可见段落集合未变化时不会刷新锚点 CFI。
+2. 连续滚动中 `rendition.currentLocation()` 偶发返回偏前章节位置，作为兜底提交时会覆盖正确进度。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 将“可见锚点 CFI 提交”前移到去重判断之前，保证每次稳态同步都可刷新进度锚点。
+  - 移除基于 `rendition.currentLocation()` 的滚动兜底提交，避免偶发回退覆盖。
+  - 保留 `relocated` 与可见锚点提交双链路：章节跳转与停留阅读都可持续更新进度。
+
+### 验证
+
+- 在上述 URL 滚动后退出重进，重进首屏文本与退出前一致。
+- 本地实测缓存 key `hmtscfal` 的 CFI 在退出重进前后保持一致，不再被回退覆盖。
+- 执行 `npm run build`，编译通过。
+
+## 2026-02-12 同章节内滚动后重进恢复位置偏差
+
+### 现象
+
+- 在同一章节内向下滚动一段后退出阅读并重新进入，恢复位置明显偏前，不是离开时看到的段落。
+
+### 根因
+
+1. 进度提交主要依赖 `relocated` 事件。
+2. 用户在章节内滚动时，不一定触发新的 `relocated`，导致保存的 CFI 停留在章节锚点附近。
+3. 重进时按旧 CFI 恢复，表现为“进度恢复不一致”。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 新增 `commitProgressByCfi`，支持直接按 CFI 提交/持久化进度。
+  - 在 `attachContentHooks` 的可见段落同步链路中，取首个可见段落，调用 `contents.section.cfiFromElement(...)` 生成锚点 CFI 并持久化。
+  - 保留原 `relocated` 提交路径，作为章节跳转场景保障。
+
+### 验证
+
+- 复测步骤：进入 `/reader?uploadId=1`，在同章节内滚动后退出再进入。
+- 结果：离开前可见首段与重进后可见首段一致；缓存 CFI 从 `.../8/1:0` 更新为 `.../28/1:0` 并被正确恢复。
+- 执行 `npm run build`，编译通过。
+
+## 2026-02-12 上传书籍阅读进度无法恢复
+
+### 现象
+
+- 上传到书架的 EPUB 打开阅读后，即使已滚动到中间位置，退出再进入仍回到开头。
+
+### 根因
+
+1. 阅读器进度缓存 key 默认由 `bookPath` 推导。
+2. 上传书籍在 `/reader` 页通过 `uploadId` 从 IndexedDB 取出后，会重新生成新的 `blob:` URL。
+3. 同一本上传书籍每次进入时 `bookPath` 都变化，导致写入和读取使用了不同 key，进度无法命中。
+
+### 解决方案
+
+- `app/components/ReaderShell.vue`
+  - 新增 `storageBookKey`，上传书籍场景使用稳定键：`upload:<id>`。
+  - 调用 `useReader` 时把稳定键传入，替代临时 `blob:` 地址参与进度持久化。
+- `app/composables/useReader.ts`
+  - `UseReaderOptions` 新增 `storageBookKey` 可选参数。
+  - 进度 key 计算改为“优先外部稳定键，回退原有 `bookPath` 推导逻辑”。
+
+### 验证
+
+- 上传 EPUB 后进入阅读，滚动到任意中间位置，退出再进入同一本上传书籍，能恢复到上次位置。
+- 执行 `npm run build`，编译通过。
+
 ## 2026-02-10 跨章节快速上滑导致进度跳变与内容闪烁
 
 ### 现象
