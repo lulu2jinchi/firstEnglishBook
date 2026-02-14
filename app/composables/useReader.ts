@@ -115,6 +115,7 @@ let readerDefinitionDb: ReaderDefinitionDB | null = null
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
 const vocabularyStorageKey = 'first-english-book-vocabulary-size'
+const locationStoragePrefix = 'first-english-book-location:'
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
 const fallbackVocabularySize = 6000
@@ -514,12 +515,67 @@ const preprocessParagraphForDefinition = async (
   }
 }
 
-const buildBookKey = (path: string) => {
+const buildLegacyBookKey = (path: string) => {
   const fileName = path.split('/').pop() || 'book'
   const baseName = fileName.replace(/\.[^.]+$/, '')
   const words = baseName.match(/[a-z0-9]+/gi) || []
   const initials = words.map((word) => word[0]).join('').slice(0, 8).toLowerCase()
   return initials || 'book'
+}
+
+const normalizeBookPathForKey = (path: string) => {
+  const trimmed = path.trim()
+  if (!trimmed) return 'book'
+
+  let decoded = trimmed
+  try {
+    decoded = decodeURIComponent(trimmed)
+  } catch {
+    decoded = trimmed
+  }
+
+  return decoded
+    .replace(/\+/g, ' ')
+    .replace(/\\/g, '/')
+    .replace(/[?#].*$/, '')
+    .replace(/^https?:\/\/[^/]+/i, '')
+    .replace(/\/+/g, '/')
+    .replace(/^\/+/, '/')
+    .toLowerCase()
+}
+
+const hashStringFNV1a = (value: string) => {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0')
+}
+
+const buildBookKey = (path: string) => `book:${hashStringFNV1a(normalizeBookPathForKey(path))}`
+
+const buildLocationStorageKey = (bookKey: string) => `${locationStoragePrefix}${bookKey}`
+
+const readLocationFromStorage = (bookKey: string) => {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.localStorage.getItem(buildLocationStorageKey(bookKey))
+    if (typeof value !== 'string') return null
+    const trimmed = value.trim()
+    return trimmed || null
+  } catch {
+    return null
+  }
+}
+
+const writeLocationToStorage = (bookKey: string, cfi: string) => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(buildLocationStorageKey(bookKey), cfi)
+  } catch {
+    // ignore localStorage write failure
+  }
 }
 
 const normalizeStorageBookKey = (key: string | null | undefined) => {
@@ -528,12 +584,36 @@ const normalizeStorageBookKey = (key: string | null | undefined) => {
   return trimmed || null
 }
 
-const loadSavedLocation = async (bookKey: string) => {
+const loadSavedLocation = async (bookKey: string, fallbackBookKeys: string[] = []) => {
+  const allKeys = [bookKey, ...fallbackBookKeys].filter(Boolean)
+  const uniqKeys = Array.from(new Set(allKeys))
+
+  for (const key of uniqKeys) {
+    const storedCfi = readLocationFromStorage(key)
+    if (storedCfi) {
+      if (key !== bookKey) {
+        writeLocationToStorage(bookKey, storedCfi)
+        void saveReaderLocation(bookKey, storedCfi)
+      }
+      return storedCfi
+    }
+  }
+
   const db = ensureReaderDefinitionDb()
   if (!db) return null
   try {
-    const record = await db.locations.get(bookKey)
-    return record?.cfi || null
+    for (const key of uniqKeys) {
+      const record = await db.locations.get(key)
+      const cfi = record?.cfi || null
+      if (!cfi) continue
+      writeLocationToStorage(key, cfi)
+      if (key !== bookKey) {
+        writeLocationToStorage(bookKey, cfi)
+        void saveReaderLocation(bookKey, cfi)
+      }
+      return cfi
+    }
+    return null
   } catch (error) {
     // eslint-disable-next-line no-console
     console.warn('读取阅读位置失败', error)
@@ -543,6 +623,7 @@ const loadSavedLocation = async (bookKey: string) => {
 
 const saveReaderLocation = async (bookKey: string, cfi?: string | null) => {
   if (!cfi) return
+  writeLocationToStorage(bookKey, cfi)
   const db = ensureReaderDefinitionDb()
   if (!db) return
   try {
@@ -1405,12 +1486,19 @@ export function useReader(
       let lastWheelFallbackAt = 0
 
       const handleWheelFallback = (event: WheelEvent) => {
-        // Continuous manager now handles chapter boundary loading itself.
-        // Wheel fallback (prev/next) can introduce artificial jumps.
-        if (readingMode.value === 'scrolled-continuous') return
         if (!scrollContainer) return
-        if (scrollContainer.scrollHeight > scrollContainer.clientHeight + 1) return
         if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return
+        const containerTop = scrollContainer.scrollTop
+        const containerBottom = containerTop + scrollContainer.clientHeight
+        const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
+        const atTopEdge = containerTop <= 1
+        const atBottomEdge = containerBottom >= scrollContainer.scrollHeight - 1
+        const containerIsScrollable = maxScrollTop > 1
+        const shouldFallback =
+          !containerIsScrollable ||
+          (event.deltaY > 0 && atBottomEdge) ||
+          (event.deltaY < 0 && atTopEdge)
+        if (!shouldFallback) return
         lastScrollInteractionAt = Date.now()
         const now = Date.now()
         if (now - lastWheelFallbackAt < wheelFallbackCooldownMs) return

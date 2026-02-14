@@ -1,5 +1,61 @@
 # Bug 修复记录
 
+## 2026-02-13 Normal People 首屏封面无法下滑进入正文
+
+### 现象
+
+- 访问 `http://localhost:3000/reader?book=book/Normal+People+(Sally+Rooney)+(Z-Library).epub`。
+- 首屏停留在封面，向下滚动（滚轮/触摸）没有反应，无法进入下一章节。
+
+### 根因
+
+1. 该书首个 spine 项是封面页，初始渲染时容器不可滚（`scrollHeight === clientHeight`）。
+2. 连续滚动模式下此前完全禁用了 `wheel fallback`（`prev/next`），用于规避跨章节跳变。
+3. 在“不可滚首屏”场景下，没有滚动事件驱动 continuous manager 继续推进，导致卡在封面。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 调整 `handleWheelFallback` 策略：不再按模式直接禁用；改为“仅当容器不可滚时”允许 wheel 触发 `rendition.next()/prev()`。
+  - 保留原有纵向滚轮判定与冷却时间限制，避免可滚状态下引入额外翻章干扰。
+
+### 验证
+
+- Playwright 复测上述 URL：
+  - 修复前：`.epub-container` 为 `scrollHeight=798`、`clientHeight=798`，滚轮后 `scrollTop` 仍为 `0`。
+  - 修复后：下滑后容器变为 `scrollHeight=1488`，`scrollTop=690`，可继续滚动进入后续章节。
+- 执行 `npm run build`，编译通过。
+
+## 2026-02-13 连续滚动章节边界卡住导致进度恢复偏前
+
+### 现象
+
+- 在 `Normal People` 连续向下阅读后，滚动会卡在章节边界附近。
+- 退出再进入时，阅读进度常常恢复到较前位置，看起来像“记不住进度”。
+
+### 根因
+
+1. 上一版仅在“容器完全不可滚”时触发 `wheel fallback`。
+2. 到章节底部时常见状态是“容器可滚但已到边界”（`scrollHeight > clientHeight` 且 `scrollTop` 已接近最大值）。
+3. 该状态不会触发兜底翻章，后续章节无法继续 append，进度锚点只能停留在较早 CFI。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - `handleWheelFallback` 改为“边界感知”：
+    - 容器不可滚时触发兜底翻章；
+    - 或者在向下滚且命中底边界时触发 `next`；
+    - 或者在向上滚且命中顶边界时触发 `prev`。
+  - 保留冷却时间与纵向滚轮判定，避免普通滚动过程频繁翻章。
+
+### 验证
+
+- Playwright 连续下滑 20 次，`scrollHeight` 从 `1488` 持续增长到 `16316`，说明章节可持续追加。
+- 滚动到深位置后退出重进：
+  - 退出前保存 `cfi=epubcfi(/6/28!/4/2/2[Chapter9]/16[pagebreak-rw_95]/14[p818]/1:0)`；
+  - 重进后从中后段恢复（`scrollTop=5349`），不再回到开头。
+- 执行 `npm run build`，编译通过。
+
 ## 2026-02-12 Hold Me Tight 快速退出场景仍有进度偏移（二次修复）
 
 ### 现象

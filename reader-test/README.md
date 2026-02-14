@@ -95,6 +95,18 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 默认应进入连续滚动（不是单章节稳定模式）
   - 上下滚动时应持续加载前后章节
 
+- 目标页面：`/reader?book=book/Normal+People+(Sally+Rooney)+(Z-Library).epub`
+- 场景：首屏封面页下滑进入正文
+- 关注点：
+  - 首屏若为封面且不可滚，首次下滑应可进入后续章节，不应卡死在封面
+  - 进入正文后容器应具备可滚高度，可继续连续下滑
+
+- 目标页面：`/reader?book=book/Normal+People+(Sally+Rooney)+(Z-Library).epub`
+- 场景：章节边界连续滚动与进度恢复
+- 关注点：
+  - 连续下滑到章节底部后，再次下滑应能进入下一章节，不应卡在边界
+  - 阅读到中后段后退出再进入，应恢复到接近离开前的位置，不应回到开头
+
 - 目标页面：`/reader?book=book/Hold+Me+Tight+Seven+Conversations+For+A+Lifetime+Of+Love+(Dr.+Sue+Johnson)+(Z-Library).epub`
 - 场景：实验性连续滚动下停滚后观察释义
 - 关注点：
