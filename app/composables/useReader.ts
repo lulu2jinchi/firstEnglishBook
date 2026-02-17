@@ -7,6 +7,11 @@ import {
   DEFAULT_READER_FONT_SIZE,
   DEFAULT_READER_LINE_HEIGHT
 } from '~/constants/readerPreferences'
+import {
+  DEFINITION_CACHE_BUST_STORAGE_KEY,
+  VOCABULARY_STORAGE_KEY
+} from '~/constants/storageKeys'
+import { clearDefinitionCacheSilently } from '~/utils/readerDefinitionCache'
 
 type ReadingMode = 'paginated' | 'scrolled-continuous' | 'scrolled-doc'
 
@@ -114,7 +119,6 @@ class ReaderDefinitionDB extends Dexie {
 let readerDefinitionDb: ReaderDefinitionDB | null = null
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
-const vocabularyStorageKey = 'first-english-book-vocabulary-size'
 const locationStoragePrefix = 'first-english-book-location:'
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
@@ -203,7 +207,7 @@ const ensureReaderDefinitionDb = () => {
 const readVocabularySizeFromStorage = (): number | null => {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(vocabularyStorageKey)
+    const raw = window.localStorage.getItem(VOCABULARY_STORAGE_KEY)
     if (!raw) return null
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) return null
@@ -669,6 +673,7 @@ export function useReader(
 
   // 缓存父页面消息监听器，便于卸载时移除
   let visibleMessageHandler: ((event: MessageEvent) => void) | null = null
+  let definitionCacheBustHandler: ((event: StorageEvent) => void) | null = null
   const paragraphDefinitionStatus = new Set<string>()
   const paragraphDocumentMap = new Map<string, Document>()
   const pendingDefinitionMap = new Map<string, SentenceDefinitionResponse>()
@@ -1054,6 +1059,12 @@ export function useReader(
       void runDefinitionQueue()
     })
 
+  const invalidateDefinitionRuntimeCache = () => {
+    paragraphDefinitionStatus.clear()
+    pendingDefinitionMap.clear()
+    void clearDefinitionCacheSilently()
+  }
+
   async function ensureLib() {
     if (ePubLib) return ePubLib
     const { default: ePub } = await import('epubjs')
@@ -1062,6 +1073,13 @@ export function useReader(
   }
 
   onMounted(async () => {
+    if (typeof window !== 'undefined' && !definitionCacheBustHandler) {
+      definitionCacheBustHandler = (event: StorageEvent) => {
+        if (event.key !== DEFINITION_CACHE_BUST_STORAGE_KEY) return
+        invalidateDefinitionRuntimeCache()
+      }
+      window.addEventListener('storage', definitionCacheBustHandler)
+    }
     attachTooltipPageLeaveHandlers()
     if (!encodedBookPath.value) {
       isLoading.value = false
@@ -1073,6 +1091,10 @@ export function useReader(
   onBeforeUnmount(() => {
     if (visibleMessageHandler) {
       window.removeEventListener('message', visibleMessageHandler)
+    }
+    if (definitionCacheBustHandler) {
+      window.removeEventListener('storage', definitionCacheBustHandler)
+      definitionCacheBustHandler = null
     }
     captureGlobalVisibleAnchor()
     resetProgressSettleState()

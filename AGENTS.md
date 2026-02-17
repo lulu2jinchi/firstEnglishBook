@@ -12,6 +12,8 @@ Always use Chinese to response.
 - app/components/ReaderShell.vue：页面 UI、样式与基础布局。
 - app/components/BottomTabBar.vue：主页/个人中心共用底部导航。
 - app/composables/useReader.ts：阅读器逻辑（加载、模式切换、进度、事件、段落释义请求队列与批处理）。
+- app/constants/storageKeys.ts：本地存储 key 常量（词汇量与释义缓存失效广播键）。
+- app/utils/readerDefinitionCache.ts：释义缓存工具（清空 Dexie `definitions` 与跨标签广播）。
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用 OpenRouter 模型生成词汇标注 JSON。
@@ -53,6 +55,7 @@ example output:
 - 批量请求仍调用 `/api/querySentenceDefination`，前端拼接 `text/annotatedText` 并合并 `targetWords`，返回后再按段落拆分并渲染。
 - 队列请求间隔为 `1000ms`，限流沿用退避逻辑。
 - 失败重试策略：同一批次立即重试，最多 `3` 次（含首次）。
+- 用户每次在个人中心点击“保存设置”后，都会清空 Dexie `definitions`，并写入 `first-english-book-definition-cache-bust-at` 触发跨标签缓存失效。
 
 文件更新要求：
 - 翻译功能更新的时候，要同步修改 choosAPI.md

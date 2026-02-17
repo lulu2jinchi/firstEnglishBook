@@ -1,5 +1,36 @@
 # Bug 修复记录
 
+## 2026-02-17 词汇量变更后释义缓存未失效
+
+### 现象
+
+- 用户在 `/user` 修改并保存词汇量后，阅读器仍可能命中旧的段落释义缓存。
+- 在跨标签页同时打开阅读器时，另一个标签页不会立即感知词汇量配置变更。
+
+### 根因
+
+1. 释义缓存写入了 Dexie `definitions`，但缺少“词汇量保存后统一失效”链路。
+2. 页面之间没有用于缓存失效同步的本地广播键，跨标签页无法及时清理内存态与持久缓存。
+
+### 解决方案
+
+- 新增 `app/constants/storageKeys.ts`，统一管理：
+  - `first-english-book-vocabulary-size`
+  - `first-english-book-definition-cache-bust-at`
+- 新增 `app/utils/readerDefinitionCache.ts`：
+  - `clearDefinitionCacheSilently()`：静默清空 Dexie `definitions`
+  - `broadcastDefinitionCacheBust()`：每次保存写入 bust 时间戳
+- `app/pages/user.vue`：
+  - 每次点击“保存设置”后，无条件执行缓存清理与 bust 广播。
+- `app/composables/useReader.ts`：
+  - 监听 `storage` 事件中的 bust key，收到后清理 `definitions`，并重置 `pendingDefinitionMap` 与 `paragraphDefinitionStatus`。
+
+### 验证
+
+- 同标签保存词汇量后，`reader-definition-cache.definitions` 被清空，`locations` 保持不变。
+- 跨标签页保存词汇量后，阅读页可收到失效信号并执行缓存清理（幂等）。
+- `npm run build` 在当前环境仍被 Node 动态库缺失阻塞（`libicui18n.74.dylib`）。
+
 ## 2026-02-17 调整行高后 tooltip 偶发遮挡单词（三次优化）
 
 ### 现象

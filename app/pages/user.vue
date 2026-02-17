@@ -54,6 +54,11 @@ import { onMounted, ref } from 'vue'
 import { useHead } from '#imports'
 import { useRouter } from 'vue-router'
 import BottomTabBar from '~/components/BottomTabBar.vue'
+import { VOCABULARY_STORAGE_KEY } from '~/constants/storageKeys'
+import {
+  broadcastDefinitionCacheBust,
+  clearDefinitionCacheSilently
+} from '~/utils/readerDefinitionCache'
 
 const router = useRouter()
 const minVocabularySize = 1000
@@ -61,7 +66,6 @@ const maxVocabularySize = 20000
 const rangeStep = 500
 const inputStep = 100
 const fallbackVocabularySize = 6000
-const vocabularyStorageKey = 'first-english-book-vocabulary-size'
 
 const vocabularySize = ref(fallbackVocabularySize)
 const saveStatus = ref('')
@@ -81,7 +85,7 @@ const clampVocabularySize = (value: number) => {
 const readLocalVocabularySize = () => {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(vocabularyStorageKey)
+    const raw = window.localStorage.getItem(VOCABULARY_STORAGE_KEY)
     if (!raw) return null
     const parsed = Number(raw)
     if (!Number.isFinite(parsed)) return null
@@ -105,7 +109,7 @@ const readServerVocabularySize = async () => {
 const writeLocalVocabularySize = (value: number) => {
   if (typeof window === 'undefined') return false
   try {
-    window.localStorage.setItem(vocabularyStorageKey, String(value))
+    window.localStorage.setItem(VOCABULARY_STORAGE_KEY, String(value))
     return true
   } catch {
     return false
@@ -169,6 +173,8 @@ const saveLevel = async () => {
   } catch {
     saveStatus.value = '保存失败，请检查浏览器存储权限与网络'
   } finally {
+    await clearDefinitionCacheSilently()
+    broadcastDefinitionCacheBust()
     isSaving.value = false
   }
 }
