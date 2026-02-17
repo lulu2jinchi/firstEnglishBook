@@ -4,7 +4,7 @@ Always use Chinese to response.
 
 项目目录结构（需随结构调整同步更新本文件）：
 - app/app.vue：入口，渲染路由页面。
-- app/pages/index.vue：默认重定向到 Home。
+- app/pages/index.vue：产品官网页（看吧阅读器品牌介绍与入口）。
 - app/pages/home.vue：书架首页（Figma 书架布局）。
 - app/pages/user.vue：个人中心页面，设置词汇量（浏览器本地）与模型配置。
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
