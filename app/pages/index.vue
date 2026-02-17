@@ -94,8 +94,8 @@ useHead({
   border-radius: 26px;
   background: rgba(255, 255, 255, 0.94);
   box-shadow:
-    0 24px 54px rgba(15, 23, 42, 0.08),
-    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+    0 14px 32px rgba(15, 23, 42, 0.06),
+    0 1px 0 rgba(255, 255, 255, 0.84) inset;
 }
 
 .hero {
@@ -105,10 +105,10 @@ useHead({
 h1 {
   margin: 0;
   font-size: clamp(42px, 7.2vw, 72px);
-  line-height: 1.01;
-  letter-spacing: -0.045em;
+  line-height: 1.04;
+  letter-spacing: -0.04em;
   color: #0f172a;
-  font-weight: 800;
+  font-weight: 700;
 }
 
 .hero-desc {
@@ -177,7 +177,7 @@ h1 {
 
 .hero-metrics li:hover {
   transform: translateY(-2px);
-  box-shadow: 0 14px 26px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
 }
 
 .hero-metrics strong {
@@ -210,7 +210,7 @@ h1 {
   border-radius: 20px;
   border: 1px solid rgba(15, 23, 42, 0.1);
   background: #e6e6ea;
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.09);
 }
 
 .reveal {
