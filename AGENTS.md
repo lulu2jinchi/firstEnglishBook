@@ -24,6 +24,7 @@ Always use Chinese to response.
 - reader-test/test-cases/*/test.ts：单用例自动化脚本（AI 可生成）。
 - reader-test/test-cases-runs/<run-id>/report.md：每次执行后的测试报告。
 - vendor/epubjs/：本地 fork 的 epub.js 源码（当前对齐 upstream `v0.3.93`，用于后续定制功能开发）。
+- public/landing/example.png：官网“阅读器释义示意图”静态资源。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
 
 API 测试（curl）：

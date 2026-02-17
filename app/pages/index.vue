@@ -1,17 +1,11 @@
 <template>
   <div class="official-page">
-    <header class="topbar">
-      <p class="brand">看吧阅读器</p>
-      <NuxtLink class="topbar-link" to="/home">进入书架</NuxtLink>
-    </header>
-
+     
     <main class="content">
       <section class="hero reveal">
-        <p class="hero-badge">English Reading Companion</p>
         <h1>看吧阅读器</h1>
-        <p class="slogan">一看一个不吱声</p>
         <p class="hero-desc">
-          让英语原著阅读不再卡顿。上传 EPUB，自动筛出生词，按你的词汇量生成贴合语境的释义，阅读和学习在同一页面一次完成。
+          让英语原著阅读不再卡顿。上传 EPUB，按你的词汇量自动筛出生词，生成贴合语境的释义，不靠刻意背单词，通过多看自然提升英语。
         </p>
         <div class="hero-actions">
           <NuxtLink class="btn btn-primary" to="/home">开始阅读</NuxtLink>
@@ -19,38 +13,30 @@
         </div>
         <ul class="hero-metrics" aria-label="产品能力概览">
           <li>
-            <strong>EPUB</strong>
-            <span>内置书 + 本地上传</span>
+            <strong>个性化难词预判</strong>
+            <span>按用户词汇量提前筛出可能不会的词，不做全量翻译。</span>
           </li>
           <li>
-            <strong>AI</strong>
-            <span>段落按词汇量释义</span>
+            <strong>语境释义而非词典直译</strong>
+            <span>给出句中含义，帮助真正看懂上下文。</span>
           </li>
           <li>
-            <strong>同步</strong>
-            <span>阅读进度可恢复</span>
+            <strong>无痛习得路径</strong>
+            <span>通过持续阅读中的语境暴露自然提升英语。</span>
           </li>
         </ul>
       </section>
 
-      <section class="feature-grid">
-        <article v-for="feature in features" :key="feature.title" class="feature-card reveal">
-          <p class="feature-tag">{{ feature.tag }}</p>
-          <h2>{{ feature.title }}</h2>
-          <p>{{ feature.desc }}</p>
-        </article>
+      <section class="demo-card reveal" aria-label="阅读器示意图">
+        <p class="demo-card__title">阅读器释义示意图</p>
+        <img
+          class="demo-card__image"
+          src="/landing/example.png"
+          alt="英文阅读段落中，词语高亮并弹出中文释义的界面示意图"
+          loading="lazy"
+        />
       </section>
 
-      <section class="flow reveal">
-        <h2>阅读流程</h2>
-        <div class="flow-list">
-          <article v-for="step in steps" :key="step.index" class="flow-step">
-            <p class="index">0{{ step.index }}</p>
-            <h3>{{ step.title }}</h3>
-            <p>{{ step.desc }}</p>
-          </article>
-        </div>
-      </section>
     </main>
   </div>
 </template>
@@ -60,37 +46,19 @@ import { useHead } from '#imports'
 
 const features = [
   {
-    tag: '书架',
-    title: '一本接一本，无缝进入阅读',
-    desc: '内置书籍可即开即读，上传 EPUB 后自动入库，不需要额外格式转换。'
+    tag: '亮点 01',
+    title: '个性化难词预判',
+    desc: '按用户词汇量提前筛出“可能不会”的词，不是全量翻译。'
   },
   {
-    tag: '释义',
-    title: '只解释你可能不会的词',
-    desc: '结合词频和词汇量阈值过滤，再按段落语境输出释义，减少无效信息干扰。'
+    tag: '亮点 02',
+    title: '语境释义而非词典直译',
+    desc: '给的是“这个句子里”的意思，帮助真正看懂上下文。'
   },
   {
-    tag: '连续滚动',
-    title: '跨章节连续读，不轻易跳回开头',
-    desc: '针对滚动边界、恢复锚点和快速退出场景做了稳定性处理，阅读更连贯。'
-  }
-]
-
-const steps = [
-  {
-    index: 1,
-    title: '挑一本书',
-    desc: '从书架选内置书，或上传你自己的 EPUB。'
-  },
-  {
-    index: 2,
-    title: '按词汇量学习',
-    desc: '系统只高亮需要关注的词，并提供贴合上下文的解释。'
-  },
-  {
-    index: 3,
-    title: '继续上次进度',
-    desc: '离开后再回来，优先恢复到你刚读到的位置。'
+    tag: '亮点 03',
+    title: '无痛习得路径',
+    desc: '不靠刻意背单词，通过持续阅读中的高频语境暴露自然提升英语。'
   }
 ]
 
@@ -173,7 +141,7 @@ useHead({
 
 .hero,
 .feature-card,
-.flow {
+.demo-card {
   border: 1px solid rgba(23, 33, 47, 0.14);
   border-radius: 24px;
   background: rgba(255, 255, 255, 0.78);
@@ -243,7 +211,6 @@ h1 {
 .btn-primary {
   color: #fffdf8;
   background: linear-gradient(120deg, #1f7059, #3f8a6b);
-  box-shadow: 0 14px 24px rgba(37, 103, 77, 0.25);
 }
 
 .btn-ghost {
@@ -280,6 +247,25 @@ h1 {
   color: rgba(23, 33, 47, 0.76);
 }
 
+.demo-card {
+  padding: 16px;
+}
+
+.demo-card__title {
+  margin: 0 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f2338;
+}
+
+.demo-card__image {
+  display: block;
+  width: 100%;
+  border-radius: 14px;
+  border: 1px solid rgba(23, 33, 47, 0.12);
+  background: #e6e6ea;
+}
+
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -311,48 +297,6 @@ h1 {
   color: rgba(23, 33, 47, 0.8);
 }
 
-.flow {
-  padding: 24px 20px;
-}
-
-.flow h2 {
-  margin: 0;
-  font-size: clamp(24px, 4vw, 34px);
-}
-
-.flow-list {
-  margin-top: 16px;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.flow-step {
-  border-radius: 14px;
-  padding: 16px 14px;
-  background: rgba(239, 245, 241, 0.9);
-  border: 1px solid rgba(23, 33, 47, 0.08);
-}
-
-.flow-step .index {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 800;
-  color: #1a675e;
-}
-
-.flow-step h3 {
-  margin: 10px 0 0;
-  font-size: 18px;
-}
-
-.flow-step p {
-  margin: 10px 0 0;
-  font-size: 14px;
-  line-height: 1.7;
-  color: rgba(23, 33, 47, 0.82);
-}
-
 .reveal {
   opacity: 0;
   transform: translateY(18px);
@@ -375,10 +319,6 @@ h1 {
   animation-delay: 0.3s;
 }
 
-.flow.reveal {
-  animation-delay: 0.36s;
-}
-
 @keyframes rise-in {
   to {
     opacity: 1;
@@ -388,10 +328,6 @@ h1 {
 
 @media (max-width: 980px) {
   .feature-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .flow-list {
     grid-template-columns: 1fr;
   }
 }
@@ -415,8 +351,7 @@ h1 {
   .hero.reveal,
   .feature-card.reveal:nth-child(1),
   .feature-card.reveal:nth-child(2),
-  .feature-card.reveal:nth-child(3),
-  .flow.reveal {
+  .feature-card.reveal:nth-child(3) {
     animation: none;
     opacity: 1;
     transform: none;
