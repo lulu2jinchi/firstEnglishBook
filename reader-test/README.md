@@ -152,6 +152,13 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 点击可释义单词时，不应出现单词背景闪烁
   - 释义 tooltip 仍可正常弹出
 
+- 目标页面：`/reader`
+- 场景：检查行高变大时释义 tooltip 贴合度
+- 关注点：
+  - 将“行高”调至 `2.0x` 及以上后点击单词，tooltip 不应明显远离目标词
+  - tooltip 不应覆盖被点击单词文本（上方或下方翻转时都需保持可见）
+  - 连续点击不同单词时，tooltip 应围绕点击位置稳定出现
+
 - 目标页面：`/reader?uploadId=<已上传书籍ID>`
 - 场景：检查上传书籍阅读进度恢复
 - 关注点：

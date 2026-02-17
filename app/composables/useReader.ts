@@ -2011,18 +2011,68 @@ export function useReader(
     }
   }
 
-  const buildVirtualReference = (span: HTMLElement, doc: Document) => {
+  const getTooltipOffsetPx = () => {
+    const next = Math.round(8 - Math.max(0, readerLineHeight.value - 1.2) * 2)
+    return Math.max(4, Math.min(8, next))
+  }
+
+  const resolveMarkerRect = (
+    span: HTMLElement,
+    doc: Document,
+    anchorPoint?: { x: number; y: number }
+  ) => {
+    const spanRect = span.getBoundingClientRect()
+    const range = doc.createRange()
+    try {
+      range.selectNodeContents(span)
+      const textRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
+      if (textRects.length > 0) {
+        if (anchorPoint) {
+          const hitRect = textRects.find(
+            (rect) =>
+              anchorPoint.x >= rect.left - 1 &&
+              anchorPoint.x <= rect.right + 1 &&
+              anchorPoint.y >= rect.top - 1 &&
+              anchorPoint.y <= rect.bottom + 1
+          )
+          if (hitRect) return hitRect
+        }
+        return textRects.reduce((maxRect, rect) => {
+          const currentArea = maxRect.width * maxRect.height
+          const nextArea = rect.width * rect.height
+          return nextArea > currentArea ? (rect as DOMRect) : maxRect
+        }, textRects[0] as DOMRect)
+      }
+    } finally {
+      range.detach?.()
+    }
+    return spanRect
+  }
+
+  const buildVirtualReference = (
+    span: HTMLElement,
+    doc: Document,
+    anchorPoint?: { x: number; y: number }
+  ) => {
     return {
       getBoundingClientRect: () => {
-        const spanRect = span.getBoundingClientRect()
+        const markerRect = resolveMarkerRect(span, doc, anchorPoint)
         const frameEl = doc.defaultView?.frameElement as HTMLElement | null
         const frameRect = frameEl?.getBoundingClientRect()
         const offsetLeft = frameRect ? frameRect.left : 0
         const offsetTop = frameRect ? frameRect.top : 0
-        const left = spanRect.left + offsetLeft
-        const top = spanRect.top + offsetTop
-        const width = spanRect.width
-        const height = spanRect.height
+        const hasAnchorPoint = Boolean(anchorPoint)
+        const clampX = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
+        const anchorXInDoc =
+          hasAnchorPoint && anchorPoint
+            ? clampX(anchorPoint.x, markerRect.left + 1, markerRect.right - 1)
+            : markerRect.left + markerRect.width / 2
+        // 纵向始终锚定单词文本框本身，避免 tooltip 覆盖单词
+        const anchorTopInDoc = markerRect.top
+        const left = anchorXInDoc + offsetLeft
+        const top = anchorTopInDoc + offsetTop
+        const width = 1
+        const height = Math.max(1, markerRect.height)
         return {
           x: left,
           y: top,
@@ -2039,17 +2089,22 @@ export function useReader(
     }
   }
 
-  const showTooltipForSpan = async (span: HTMLElement, doc: Document, meaning: string) => {
+  const showTooltipForSpan = async (
+    span: HTMLElement,
+    doc: Document,
+    meaning: string,
+    anchorPoint?: { x: number; y: number }
+  ) => {
     const tooltip = ensureTooltipElement()
     if (!tooltip) return
     tooltip.textContent = meaning
     tooltip.dataset.show = 'true'
 
     const boundary = getTooltipBoundary()
-    const virtualReference = buildVirtualReference(span, doc)
+    const virtualReference = buildVirtualReference(span, doc, anchorPoint)
     const updatePosition = async () => {
       const middleware = [
-        offset(8),
+        offset(getTooltipOffsetPx()),
         flip(boundary ? { boundary, padding: 8 } : undefined),
         shift(boundary ? { boundary, padding: 8 } : { padding: 8 }),
         ...(boundary
@@ -2124,10 +2179,13 @@ export function useReader(
       const meaningKey = normalizeWordKey(markerEl.dataset.meaningKey || '')
       markerEl.style.textDecoration = 'underline'
       markerEl.style.cursor = 'pointer'
-      markerEl.addEventListener('click', () => {
+      markerEl.addEventListener('click', (event) => {
         const meaning = meaningMap[meaningKey]
         if (meaning) {
-          void showTooltipForSpan(markerEl, doc, meaning)
+          void showTooltipForSpan(markerEl, doc, meaning, {
+            x: event.clientX,
+            y: event.clientY
+          })
         } else {
           hideTooltip()
         }
