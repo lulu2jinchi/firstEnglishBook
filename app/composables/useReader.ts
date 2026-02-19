@@ -98,6 +98,14 @@ type LocationRecord = {
   updatedAt: number
 }
 
+type ShiftTooltipDocState = {
+  hoveredMarker: HTMLElement | null
+  anchorPoint: { x: number; y: number } | null
+  openedByShift: boolean
+  keydownHandler: (event: KeyboardEvent) => void
+  keyupHandler: (event: KeyboardEvent) => void
+}
+
 class ReaderDefinitionDB extends Dexie {
   definitions!: Table<DefinitionRecord, string>
   locations!: Table<LocationRecord, string>
@@ -680,6 +688,8 @@ export function useReader(
   let documentParagraphIds = new WeakMap<Document, Set<string>>()
   let documentContentsMap = new WeakMap<Document, any>()
   const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
+  const markerMeaningMap = new WeakMap<HTMLElement, string>()
+  const shiftTooltipDocStates = new WeakMap<Document, ShiftTooltipDocState>()
   let tooltipEl: HTMLDivElement | null = null
   let tooltipCleanup: (() => void) | null = null
   let tooltipPageLeaveHandler: (() => void) | null = null
@@ -1665,6 +1675,7 @@ export function useReader(
         }
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
         removeTooltipDismissHandler(doc)
+        removeShiftTooltipKeyHandlers(doc)
         removeDocumentParagraphs(doc)
         documentContentsMap.delete(doc)
         visibleMap.clear()
@@ -2159,6 +2170,46 @@ export function useReader(
     tooltipCleanup = autoUpdate(virtualReference, tooltip, updatePosition)
   }
 
+  const showTooltipForShiftHover = (doc: Document, state: ShiftTooltipDocState) => {
+    if (!state.hoveredMarker) return
+    const meaning = markerMeaningMap.get(state.hoveredMarker)
+    if (!meaning) return
+    state.openedByShift = true
+    void showTooltipForSpan(state.hoveredMarker, doc, meaning, state.anchorPoint || undefined)
+  }
+
+  const ensureShiftTooltipKeyHandlers = (doc: Document) => {
+    if (shiftTooltipDocStates.has(doc)) return
+    const state: ShiftTooltipDocState = {
+      hoveredMarker: null,
+      anchorPoint: null,
+      openedByShift: false,
+      keydownHandler: () => {},
+      keyupHandler: () => {}
+    }
+    state.keydownHandler = (event: KeyboardEvent) => {
+      if (event.key !== 'Shift') return
+      showTooltipForShiftHover(doc, state)
+    }
+    state.keyupHandler = (event: KeyboardEvent) => {
+      if (event.key !== 'Shift') return
+      if (!state.openedByShift) return
+      state.openedByShift = false
+      hideTooltip()
+    }
+    doc.addEventListener('keydown', state.keydownHandler)
+    doc.addEventListener('keyup', state.keyupHandler)
+    shiftTooltipDocStates.set(doc, state)
+  }
+
+  const removeShiftTooltipKeyHandlers = (doc: Document) => {
+    const state = shiftTooltipDocStates.get(doc)
+    if (!state) return
+    doc.removeEventListener('keydown', state.keydownHandler)
+    doc.removeEventListener('keyup', state.keyupHandler)
+    shiftTooltipDocStates.delete(doc)
+  }
+
   const applyDefinitionToParagraph = (doc: Document, paragraphId: string, resp: SentenceDefinitionResponse) => {
     if (!resp.sentence || !resp.meaning) {
       // eslint-disable-next-line no-console
@@ -2188,6 +2239,7 @@ export function useReader(
 
     const meaningMap = normalizeMeaningMap(resp.meaning)
     attachTooltipDismissHandler(doc)
+    ensureShiftTooltipKeyHandlers(doc)
     const markerResult = applySentenceMarkersToParagraph(paragraphEl, resp.sentence)
     if (!markerResult.success) {
       // eslint-disable-next-line no-console
@@ -2199,10 +2251,40 @@ export function useReader(
     const markerEls = Array.from(paragraphEl.querySelectorAll<HTMLElement>('[data-meaning-key]'))
     markerEls.forEach((markerEl) => {
       const meaningKey = normalizeWordKey(markerEl.dataset.meaningKey || '')
+      const meaning = meaningMap[meaningKey]
+      if (meaning) {
+        markerMeaningMap.set(markerEl, meaning)
+      }
       markerEl.style.textDecoration = 'underline'
       markerEl.style.cursor = 'pointer'
+      const updateShiftHover = (event: MouseEvent) => {
+        const state = shiftTooltipDocStates.get(doc)
+        if (!state) return
+        state.hoveredMarker = markerEl
+        state.anchorPoint = { x: event.clientX, y: event.clientY }
+        if (!event.shiftKey || !meaning) return
+        state.openedByShift = true
+        void showTooltipForSpan(markerEl, doc, meaning, state.anchorPoint)
+      }
+      const clearShiftHover = (event: MouseEvent) => {
+        const state = shiftTooltipDocStates.get(doc)
+        if (!state) return
+        if (state.hoveredMarker === markerEl) {
+          state.hoveredMarker = null
+          state.anchorPoint = null
+        }
+        if (!event.shiftKey || !state.openedByShift) return
+        state.openedByShift = false
+        hideTooltip()
+      }
+      markerEl.addEventListener('mouseenter', updateShiftHover)
+      markerEl.addEventListener('mousemove', updateShiftHover)
+      markerEl.addEventListener('mouseleave', clearShiftHover)
       markerEl.addEventListener('click', (event) => {
-        const meaning = meaningMap[meaningKey]
+        const state = shiftTooltipDocStates.get(doc)
+        if (state) {
+          state.openedByShift = false
+        }
         if (meaning) {
           void showTooltipForSpan(markerEl, doc, meaning, {
             x: event.clientX,

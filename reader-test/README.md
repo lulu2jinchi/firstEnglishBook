@@ -152,6 +152,14 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 点击可释义单词时，不应出现单词背景闪烁
   - 释义 tooltip 仍可正常弹出
 
+- 目标页面：`/reader`（PC 桌面端）
+- 场景：检查按住 `Shift` 的释义快捷交互
+- 关注点：
+  - 鼠标悬停在可释义单词上时，按住 `Shift` 应弹出对应释义 tooltip
+  - 保持按住 `Shift` 在不同可释义单词间移动时，tooltip 应随当前单词更新
+  - 松开 `Shift` 后，Shift 触发的 tooltip 应自动关闭
+  - 点击触发释义能力仍保持可用，不受 Shift 交互影响
+
 - 目标页面：`/reader`
 - 场景：检查行高变大时释义 tooltip 贴合度
 - 关注点：

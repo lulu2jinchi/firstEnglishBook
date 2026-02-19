@@ -1,5 +1,36 @@
 # Bug 修复记录
 
+## 2026-02-18 PC 端按住 Shift 无法查看释义
+
+### 现象
+
+- 在 `/reader` 的桌面端阅读场景中，用户只能通过点击单词查看释义。
+- 按住 `Shift` 键不会触发释义气泡，无法满足“键盘辅助查看释义”的交互需求。
+
+### 根因
+
+1. `app/composables/useReader.ts` 中的释义展示仅绑定了 `click` 事件。
+2. 没有记录“当前悬停单词”状态，也没有 `Shift keydown/keyup` 监听链路。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 新增文档级 `Shift` 键监听（`keydown/keyup`）：
+    - `keydown(Shift)` 时，若当前悬停在可释义单词上，直接展示 tooltip。
+    - `keyup(Shift)` 时，若 tooltip 由 Shift 触发，则自动收起。
+  - 新增单词悬停状态记录（`mouseenter/mousemove/mouseleave`）：
+    - 记录当前悬停 token 与鼠标坐标锚点。
+    - 悬停期间若检测到 `event.shiftKey === true`，立即展示释义。
+  - 保留原有点击触发行为，点击打开释义不受影响。
+  - 在 iframe 内容销毁时移除 `Shift` 监听，避免事件泄漏。
+
+### 验证
+
+- 鼠标悬停在可释义单词上，按住 `Shift` 可直接显示释义 tooltip。
+- 保持按住 `Shift` 在不同单词间移动，tooltip 跟随当前单词更新。
+- 松开 `Shift` 后，Shift 触发的 tooltip 自动关闭；点击触发逻辑仍可正常使用。
+- `npm run build` 在当前环境仍被 Node 动态库缺失阻塞（`libicui18n.74.dylib`）。
+
 ## 2026-02-17 词汇量变更后释义缓存未失效
 
 ### 现象
