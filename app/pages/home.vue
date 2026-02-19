@@ -1,9 +1,31 @@
 <template>
   <div class="home-page">
-    <label class="search-bar" aria-label="搜索书籍">
-      <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
-      <input v-model="searchQuery" type="search" placeholder="Search" />
-    </label>
+    <div class="toolbar">
+      <label class="search-bar" aria-label="搜索书籍">
+        <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+        <input v-model="searchQuery" type="search" placeholder="Search" />
+      </label>
+      <button class="edit-toggle" type="button" @click="handleEditToggle">
+        {{ editMode ? '完成' : '编辑' }}
+      </button>
+    </div>
+
+    <div v-if="editMode" class="edit-panel">
+      <p class="edit-count">已选 {{ selectedCount }} 本</p>
+      <div class="edit-actions">
+        <button class="edit-action-btn" type="button" @click="toggleSelectAll">
+          {{ isAllSelected ? '取消全选' : '全选' }}
+        </button>
+        <button
+          class="edit-action-btn edit-action-btn--danger"
+          type="button"
+          :disabled="selectedCount === 0"
+          @click="removeSelectedBooks"
+        >
+          移出书架
+        </button>
+      </div>
+    </div>
 
     <input
       ref="fileInput"
@@ -18,13 +40,31 @@
         v-for="book in filteredBooks"
         :key="book.file"
         class="card"
-        :class="{ 'card--uploading': book.isUploading }"
-        :role="book.isUploading ? 'presentation' : 'button'"
+        :class="{
+          'card--uploading': book.isUploading,
+          'card--editing': editMode && !book.isUploading,
+          'card--selected': editMode && isBookSelected(book)
+        }"
+        :role="book.isUploading ? 'presentation' : editMode ? 'checkbox' : 'button'"
+        :aria-checked="book.isUploading || !editMode ? undefined : String(isBookSelected(book))"
         :aria-disabled="book.isUploading ? 'true' : 'false'"
         :tabindex="book.isUploading ? -1 : 0"
+        @pointerdown="handleBookPointerDown(book, $event)"
+        @pointermove="handleBookPointerMove($event)"
+        @pointerup="clearBookLongPress"
+        @pointerleave="clearBookLongPress"
+        @pointercancel="clearBookLongPress"
         @click="handleBookClick(book)"
       >
         <div class="cover">
+          <div
+            v-if="editMode && !book.isUploading"
+            class="selection-badge"
+            :class="{ 'selection-badge--active': isBookSelected(book) }"
+            aria-hidden="true"
+          >
+            <i class="fa-solid fa-check" aria-hidden="true"></i>
+          </div>
           <div v-if="book.isUploading" class="cover-upload" aria-hidden="true">
             <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
             <span>上传中</span>
@@ -48,19 +88,16 @@ import { useHead } from '#imports'
 import Dexie, { type Table } from 'dexie'
 import BottomTabBar from '~/components/BottomTabBar.vue'
 
-const imgRightSide =
-  "https://www.figma.com/api/mcp/asset/c06005b8-a781-41f5-aab5-5c7c1590b92f";
-const imgTime =
-  "https://www.figma.com/api/mcp/asset/74f541a2-42b8-4a06-82da-9f562ec5b317";
-
 type RawBook = {
   file: string
+  source: 'base' | 'upload'
   title?: string
   id?: number
 }
 
 type BookItem = {
   file: string
+  source: 'base' | 'upload'
   title: string
   cover: string | null
   isUploading?: boolean
@@ -100,19 +137,34 @@ const searchQuery = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const coverStates = ref<Record<string, string | null>>({})
 const loadingCovers = new Set<string>()
+const hiddenBaseBookStorageKey = 'first-english-book-hidden-base-books'
+const hiddenBaseBooks = ref<Set<string>>(new Set())
+const editMode = ref(false)
+const selectedBookKeys = ref<Set<string>>(new Set())
+const suppressClickBookKey = ref<string | null>(null)
+
+const longPressDelayMs = 450
+const longPressMoveTolerance = 12
+let longPressTimer: ReturnType<typeof setTimeout> | null = null
+let longPressStartX = 0
+let longPressStartY = 0
 
 const baseBooks: RawBook[] = [
-  { file: 'book/Hold Me Tight Seven Conversations For A Lifetime Of Love (Dr. Sue Johnson) (Z-Library).epub' },
-  { file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
-  { file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
-  { file: 'book/oz.epub' },
-  { file: 'book/rose.epub' }
+  { source: 'base', file: 'book/Hold Me Tight Seven Conversations For A Lifetime Of Love (Dr. Sue Johnson) (Z-Library).epub' },
+  { source: 'base', file: 'book/Normal People (Sally Rooney) (Z-Library).epub' },
+  { source: 'base', file: 'book/The happiness hypothesis putting ancient wisdom and -- Jonathan Haidt -- ( WeLib.org ).epub' },
+  { source: 'base', file: 'book/oz.epub' },
+  { source: 'base', file: 'book/rose.epub' }
 ]
 
 const uploadedBooks = ref<RawBook[]>([])
 const activeBookUrls = new Set<string>()
 
-const rawBooks = computed<RawBook[]>(() => [...uploadedBooks.value, ...baseBooks])
+const visibleBaseBooks = computed<RawBook[]>(() =>
+  baseBooks.filter((book) => !hiddenBaseBooks.value.has(book.file))
+)
+
+const rawBooks = computed<RawBook[]>(() => [...uploadedBooks.value, ...visibleBaseBooks.value])
 
 const books = computed<BookItem[]>(() =>
   rawBooks.value.map((book) => {
@@ -121,11 +173,25 @@ const books = computed<BookItem[]>(() =>
     const title = book.title?.trim() || derivedTitle || '未命名书籍'
     return {
       file: book.file,
+      source: book.source,
       title,
       cover: coverStates.value[book.file] ?? null,
       id: book.id
     }
   })
+)
+
+const getBookSelectionKey = (book: Pick<BookItem, 'source' | 'file' | 'id'>) => {
+  if (book.source === 'upload' && typeof book.id === 'number') {
+    return `upload:${book.id}`
+  }
+  return `${book.source}:${book.file}`
+}
+
+const selectableBooks = computed(() => books.value.filter((book) => !book.isUploading))
+const selectedCount = computed(() => selectedBookKeys.value.size)
+const isAllSelected = computed(
+  () => selectableBooks.value.length > 0 && selectedCount.value === selectableBooks.value.length
 )
 
 const filteredBooks = computed(() => {
@@ -139,15 +205,103 @@ const filteredBooks = computed(() => {
 })
 
 const goRead = (book: BookItem) => {
-  if (typeof book.id === 'number') {
+  if (book.source === 'upload' && typeof book.id === 'number') {
     router.push({ path: '/reader', query: { uploadId: String(book.id) } })
     return
   }
   router.push({ path: '/reader', query: { book: book.file } })
 }
 
+const isBookSelected = (book: BookItem) => {
+  const key = getBookSelectionKey(book)
+  return selectedBookKeys.value.has(key)
+}
+
+const toggleBookSelection = (book: BookItem) => {
+  if (book.isUploading) return
+  const key = getBookSelectionKey(book)
+  const next = new Set(selectedBookKeys.value)
+  if (next.has(key)) {
+    next.delete(key)
+  } else {
+    next.add(key)
+  }
+  selectedBookKeys.value = next
+}
+
+const enterEditModeWithBook = (book?: BookItem) => {
+  editMode.value = true
+  if (!book || book.isUploading) return
+  const next = new Set(selectedBookKeys.value)
+  next.add(getBookSelectionKey(book))
+  selectedBookKeys.value = next
+}
+
+const exitEditMode = () => {
+  editMode.value = false
+  selectedBookKeys.value = new Set()
+}
+
+const handleEditToggle = () => {
+  if (editMode.value) {
+    exitEditMode()
+    return
+  }
+  editMode.value = true
+}
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedBookKeys.value = new Set()
+    return
+  }
+  selectedBookKeys.value = new Set(
+    selectableBooks.value.map((book) => getBookSelectionKey(book))
+  )
+}
+
+const clearBookLongPress = () => {
+  if (longPressTimer) {
+    clearTimeout(longPressTimer)
+    longPressTimer = null
+  }
+}
+
+const handleBookPointerDown = (book: BookItem, event: PointerEvent) => {
+  if (editMode.value || book.isUploading) return
+  if (event.pointerType === 'mouse' && event.button !== 0) return
+
+  clearBookLongPress()
+  longPressStartX = event.clientX
+  longPressStartY = event.clientY
+  const selectionKey = getBookSelectionKey(book)
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null
+    suppressClickBookKey.value = selectionKey
+    enterEditModeWithBook(book)
+  }, longPressDelayMs)
+}
+
+const handleBookPointerMove = (event: PointerEvent) => {
+  if (!longPressTimer) return
+  const movedX = Math.abs(event.clientX - longPressStartX)
+  const movedY = Math.abs(event.clientY - longPressStartY)
+  if (movedX > longPressMoveTolerance || movedY > longPressMoveTolerance) {
+    clearBookLongPress()
+  }
+}
+
 const handleBookClick = (book: BookItem) => {
   if (book.isUploading) return
+  const key = getBookSelectionKey(book)
+  if (suppressClickBookKey.value === key) {
+    suppressClickBookKey.value = null
+    return
+  }
+  if (editMode.value) {
+    toggleBookSelection(book)
+    return
+  }
   goRead(book)
 }
 
@@ -157,6 +311,93 @@ const goUser = () => {
 
 const goHome = () => {
   router.push('/home')
+}
+
+const readHiddenBaseBooks = () => {
+  if (typeof window === 'undefined') return new Set<string>()
+  try {
+    const raw = window.localStorage.getItem(hiddenBaseBookStorageKey)
+    if (!raw) return new Set<string>()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set<string>()
+    const files = parsed.filter((item): item is string => typeof item === 'string')
+    return new Set(files)
+  } catch {
+    return new Set<string>()
+  }
+}
+
+const persistHiddenBaseBooks = () => {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(
+      hiddenBaseBookStorageKey,
+      JSON.stringify(Array.from(hiddenBaseBooks.value))
+    )
+  } catch {
+    // ignore storage error
+  }
+}
+
+const removeCoverState = (file: string) => {
+  if (!(file in coverStates.value)) return
+  const next = { ...coverStates.value }
+  delete next[file]
+  coverStates.value = next
+}
+
+const removeSelectedBooks = async () => {
+  if (selectedCount.value === 0) return
+  const selectedKeys = new Set(selectedBookKeys.value)
+  const selectedBooks = books.value.filter((book) => selectedKeys.has(getBookSelectionKey(book)))
+  if (selectedBooks.length === 0) return
+
+  const shouldRemove = window.confirm(`确认将选中的 ${selectedBooks.length} 本书移出书架吗？`)
+  if (!shouldRemove) return
+
+  const uploadedSelection = selectedBooks.filter((book) => book.source === 'upload')
+  const baseSelection = selectedBooks.filter((book) => book.source === 'base')
+
+  const uploadIds = uploadedSelection
+    .map((book) => book.id)
+    .filter((id): id is number => typeof id === 'number')
+  if (uploadIds.length > 0) {
+    const db = ensureUploadBookDb()
+    if (db) {
+      try {
+        await db.uploads.bulkDelete(uploadIds)
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('批量删除上传书籍失败', error)
+      }
+    }
+  }
+
+  if (uploadedSelection.length > 0) {
+    const filesToRemove = new Set(uploadedSelection.map((book) => book.file))
+    uploadedBooks.value = uploadedBooks.value.filter((book) => !filesToRemove.has(book.file))
+    filesToRemove.forEach((file) => {
+      if (activeBookUrls.has(file)) {
+        URL.revokeObjectURL(file)
+        activeBookUrls.delete(file)
+      }
+      loadingCovers.delete(file)
+      removeCoverState(file)
+    })
+  }
+
+  if (baseSelection.length > 0) {
+    const nextHidden = new Set(hiddenBaseBooks.value)
+    baseSelection.forEach((book) => {
+      nextHidden.add(book.file)
+      loadingCovers.delete(book.file)
+      removeCoverState(book.file)
+    })
+    hiddenBaseBooks.value = nextHidden
+    persistHiddenBaseBooks()
+  }
+
+  exitEditMode()
 }
 
 const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
@@ -213,6 +454,7 @@ const loadUploadedBooks = async () => {
       const url = URL.createObjectURL(record.blob)
       activeBookUrls.add(url)
       return {
+        source: 'upload',
         id: record.id,
         file: url,
         title: record.title
@@ -225,10 +467,12 @@ const loadUploadedBooks = async () => {
 }
 
 onMounted(() => {
+  hiddenBaseBooks.value = readHiddenBaseBooks()
   void loadUploadedBooks()
 })
 
 onBeforeUnmount(() => {
+  clearBookLongPress()
   revokeActiveBookUrls()
 })
 
@@ -248,6 +492,7 @@ const uploadLabel = computed(() => {
 const uploadCard = computed<BookItem | null>(() => {
   if (!showUploadCard.value) return null
   return {
+    source: 'upload',
     file: uploadingBookId.value || 'uploading',
     title: uploadingBookTitle.value || '上传中',
     cover: null,
@@ -318,7 +563,7 @@ const handleUpload = (event: Event) => {
     }
 
     uploadedBooks.value = [
-      { id: recordId ?? undefined, file: objectUrl, title },
+      { source: 'upload', id: recordId ?? undefined, file: objectUrl, title },
       ...uploadedBooks.value
     ]
     uploadProgress.value = 100
@@ -379,7 +624,14 @@ useHead({
   object-fit: contain;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .search-bar {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -410,6 +662,58 @@ useHead({
   color: #828282;
 }
 
+.edit-toggle {
+  height: 44px;
+  border: none;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #1d1b20;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.edit-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+.edit-count {
+  margin: 0;
+  font-size: 13px;
+  color: #4c4c4c;
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-action-btn {
+  border: 1px solid #d8d8d8;
+  background: #ffffff;
+  color: #222222;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.edit-action-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.edit-action-btn--danger {
+  border-color: #ffbeb8;
+  background: #fff0ee;
+  color: #c23d2f;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -438,6 +742,14 @@ useHead({
   cursor: default;
 }
 
+.card--editing .cover {
+  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.1);
+}
+
+.card--selected .cover {
+  box-shadow: inset 0 0 0 2px #2f8bff;
+}
+
 .cover {
   position: relative;
   width: 100%;
@@ -445,6 +757,37 @@ useHead({
   border-radius: 8px;
   overflow: hidden;
   background: #f2efe9;
+}
+
+.selection-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  width: 26px;
+  height: 26px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  pointer-events: none;
+}
+
+.selection-badge i {
+  font-size: 12px;
+  opacity: 0;
+}
+
+.selection-badge--active {
+  border-color: #2f8bff;
+  background: #2f8bff;
+}
+
+.selection-badge--active i {
+  opacity: 1;
 }
 
 .cover-upload {
