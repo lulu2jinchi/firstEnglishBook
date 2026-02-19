@@ -1,3 +1,20 @@
+## 2026-02-19 阅读器翻译链路更新（长按查词）
+
+本次翻译功能更新新增“移动端长按查词”，接口仍统一走 `/api/querySentenceDefination`，但新增了单词级请求约束：
+
+- 请求体必须显式传入：
+  - `text`: 选中的原始单词（如 `fragile`）
+  - `annotatedText`: 仅该词带中括号（如 `[fragile]`）
+  - `targetWords`: 小写去重数组（如 `["fragile"]`）
+  - `vocabularySize`: 当前词汇量阈值（如 `6000`）
+- 返回约束保持一致：
+  - `sentence` 必须与 `annotatedText` 严格一致（服务端会强制回传 `annotatedText`）
+  - `meaning` 必须是对象，且键集合与 `targetWords` 完全一致
+- 前端渲染策略：
+  - 已自动标注词优先读本地 `markerMeaningMap`
+  - 未标注词使用单词级接口请求并缓存结果
+  - 长按后先展示“查词”操作按钮，点击按钮后再请求并通过 tooltip 展示释义
+
 我是硅基流动用户，我可以使用硅基流动的这些模型：
 Pro/Qwen/Qwen2.5-7B-Instruct
 deepseek-ai/DeepSeek-R1-Distill-Qwen-32B

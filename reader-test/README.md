@@ -13,6 +13,9 @@ reader-test/
     should-return-meaning-json/
       test.md
       test.ts
+    should-support-single-word-lookup/
+      test.md
+      test.ts
   test-cases-runs/
 ```
 
@@ -216,3 +219,11 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 标签 B 点击“保存设置”后，应写入 `first-english-book-definition-cache-bust-at`
   - 标签 A 应响应 `storage` 事件并执行释义缓存失效流程（重复触发不报错）
   - 标签 A 后续进入的新段落应按最新状态重建释义缓存
+
+- 目标页面：`/reader`（移动端触屏）
+- 场景：检查未自动标注词的“长按查词”能力
+- 关注点：
+  - 在正文中长按英文单词（包含未被自动中括号标注的词）应先弹出“查词”按钮
+  - 点击“查词”按钮后再弹出释义 tooltip
+  - 同一词重复长按应可快速复用结果，不出现明显重复等待
+  - 长按后若接口失败，应出现顶部错误提示，不应导致阅读器卡死

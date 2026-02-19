@@ -106,6 +106,34 @@ type ShiftTooltipDocState = {
   keyupHandler: (event: KeyboardEvent) => void
 }
 
+type ManualLookupCandidate = {
+  rawWord: string
+  normalizedWord: string
+  anchorRect: DOMRect
+  anchorPoint?: { x: number; y: number }
+  markerEl?: HTMLElement | null
+}
+
+type ManualLookupDocState = {
+  touchPoint: { x: number; y: number } | null
+  touchTarget: EventTarget | null
+  touchTimer: ReturnType<typeof setTimeout> | null
+  lastLongPressAt: number
+  lastLookupWord: string
+  lastLookupAt: number
+  touchstartHandler: (event: TouchEvent) => void
+  touchmoveHandler: (event: TouchEvent) => void
+  touchendHandler: () => void
+  touchcancelHandler: () => void
+  selectionchangeHandler: () => void
+}
+
+type PendingLookupAction = {
+  doc: Document
+  state: ManualLookupDocState
+  candidate: ManualLookupCandidate
+}
+
 class ReaderDefinitionDB extends Dexie {
   definitions!: Table<DefinitionRecord, string>
   locations!: Table<LocationRecord, string>
@@ -690,8 +718,14 @@ export function useReader(
   const tooltipDismissHandlers = new WeakMap<Document, (event: MouseEvent) => void>()
   const markerMeaningMap = new WeakMap<HTMLElement, string>()
   const shiftTooltipDocStates = new WeakMap<Document, ShiftTooltipDocState>()
+  const manualLookupDocStates = new WeakMap<Document, ManualLookupDocState>()
+  const manualMeaningCache = new Map<string, string>()
+  const manualMeaningPendingMap = new Map<string, Promise<string | null>>()
+  let pendingLookupAction: PendingLookupAction | null = null
   let tooltipEl: HTMLDivElement | null = null
   let tooltipCleanup: (() => void) | null = null
+  let lookupActionEl: HTMLDivElement | null = null
+  let lookupActionCleanup: (() => void) | null = null
   let tooltipPageLeaveHandler: (() => void) | null = null
   let tooltipVisibilityHandler: (() => void) | null = null
   let tooltipTopScrollHandler: (() => void) | null = null
@@ -710,6 +744,10 @@ export function useReader(
   const continuousMinVisibleRatio = 0.55
   const batchParagraphSeparator = '\n\n<<<__PARA_SPLIT__>>>\n\n'
   const maxBackoffMs = 120000
+  const longPressDelayMs = 420
+  const longPressMoveTolerancePx = 12
+  const selectionLookupWindowMs = 1200
+  const manualLookupDedupMs = 1500
   let queueRunning = false
   let nextAllowedAt = 0
   let backoffMs = 0
@@ -1056,12 +1094,12 @@ export function useReader(
     queueRunning = false
   }
 
-  const enqueueDefinitionTask = (task: () => Promise<void>) =>
-    new Promise<void>((resolve, reject) => {
+  const enqueueDefinitionTask = <T>(task: () => Promise<T>) =>
+    new Promise<T>((resolve, reject) => {
       definitionQueue.push(async () => {
         try {
-          await task()
-          resolve()
+          const result = await task()
+          resolve(result)
         } catch (error) {
           reject(error)
         }
@@ -1072,6 +1110,8 @@ export function useReader(
   const invalidateDefinitionRuntimeCache = () => {
     paragraphDefinitionStatus.clear()
     pendingDefinitionMap.clear()
+    manualMeaningCache.clear()
+    manualMeaningPendingMap.clear()
     void clearDefinitionCacheSilently()
   }
 
@@ -1113,6 +1153,7 @@ export function useReader(
     clearApiError()
     removeTooltipPageLeaveHandlers()
     hideTooltip()
+    hideLookupAction()
     const topDoc = getTopWindow()?.document
     if (topDoc) {
       removeTooltipDismissHandler(topDoc)
@@ -1507,6 +1548,7 @@ export function useReader(
       }
 
       doc.addEventListener('dblclick', handleDblClick)
+      ensureManualLookupHandlers(doc)
 
       const visibleMap = new Map<HTMLElement, { id: string; text: string; element: HTMLElement; visibleRatio: number }>()
       let lastPayloadKey = ''
@@ -1676,6 +1718,7 @@ export function useReader(
         if (win.getVisibleParagraphs) delete win.getVisibleParagraphs
         removeTooltipDismissHandler(doc)
         removeShiftTooltipKeyHandlers(doc)
+        removeManualLookupHandlers(doc)
         removeDocumentParagraphs(doc)
         documentContentsMap.delete(doc)
         visibleMap.clear()
@@ -1937,6 +1980,32 @@ export function useReader(
       '}',
       '.reader-meaning-tooltip[data-show="true"] {',
       '  opacity: 1;',
+      '}',
+      '.reader-lookup-action {',
+      '  position: fixed;',
+      '  z-index: 10000;',
+      '  pointer-events: auto;',
+      '  opacity: 0;',
+      '  transform: translateY(2px);',
+      '  transition: opacity 0.12s ease, transform 0.12s ease;',
+      '}',
+      '.reader-lookup-action[data-show="true"] {',
+      '  opacity: 1;',
+      '  transform: translateY(0);',
+      '}',
+      '.reader-lookup-action-btn {',
+      '  border: none;',
+      '  border-radius: 999px;',
+      '  padding: 6px 12px;',
+      '  font-size: 12px;',
+      '  font-weight: 700;',
+      '  cursor: pointer;',
+      '  color: #ffffff;',
+      '  background: #0f172a;',
+      '  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);',
+      '}',
+      '.reader-lookup-action-btn:active {',
+      '  transform: scale(0.98);',
       '}'
     ].join('\n')
   }
@@ -1954,14 +2023,25 @@ export function useReader(
 
   syncTooltipPalette(readerTheme.value)
 
+  const hideLookupAction = () => {
+    pendingLookupAction = null
+    if (!lookupActionEl) return
+    lookupActionEl.dataset.show = 'false'
+    if (lookupActionCleanup) {
+      lookupActionCleanup()
+      lookupActionCleanup = null
+    }
+  }
+
   const attachTooltipDismissHandler = (doc: Document) => {
     if (tooltipDismissHandlers.has(doc)) return
     const handler = (event: MouseEvent) => {
       const target = event.target as Element | null
       const clickedMeaning = target?.closest?.('[data-meaning-key]')
-      if (!clickedMeaning) {
-        hideTooltip()
-      }
+      const clickedLookupAction = target?.closest?.('.reader-lookup-action')
+      if (clickedMeaning || clickedLookupAction) return
+      hideTooltip()
+      hideLookupAction()
     }
     doc.addEventListener('click', handler)
     tooltipDismissHandlers.set(doc, handler)
@@ -1990,6 +2070,32 @@ export function useReader(
     return tooltipEl
   }
 
+  const ensureLookupActionElement = () => {
+    const topWindow = getTopWindow()
+    if (!topWindow) return null
+    const topDoc = topWindow.document
+    ensureTooltipStyles(topDoc)
+    attachTooltipDismissHandler(topDoc)
+    if (!lookupActionEl || lookupActionEl.ownerDocument !== topDoc) {
+      lookupActionEl = topDoc.createElement('div')
+      lookupActionEl.className = 'reader-lookup-action'
+      lookupActionEl.dataset.show = 'false'
+      const buttonEl = topDoc.createElement('button')
+      buttonEl.type = 'button'
+      buttonEl.className = 'reader-lookup-action-btn'
+      buttonEl.textContent = '查词'
+      buttonEl.addEventListener('click', () => {
+        const pending = pendingLookupAction
+        if (!pending) return
+        hideLookupAction()
+        void triggerManualLookupByCandidate(pending.doc, pending.state, pending.candidate)
+      })
+      lookupActionEl.appendChild(buttonEl)
+      topDoc.body.appendChild(lookupActionEl)
+    }
+    return lookupActionEl
+  }
+
   const getTooltipBoundary = () => {
     const topWindow = getTopWindow()
     const topDoc = topWindow?.document || null
@@ -2010,11 +2116,13 @@ export function useReader(
     if (tooltipPageLeaveHandler || typeof window === 'undefined') return
     tooltipPageLeaveHandler = () => {
       hideTooltip()
+      hideLookupAction()
       flushSavedLocation()
     }
     tooltipVisibilityHandler = () => {
       if (document.visibilityState === 'hidden') {
         hideTooltip()
+        hideLookupAction()
       }
     }
     window.addEventListener('pagehide', tooltipPageLeaveHandler)
@@ -2023,7 +2131,10 @@ export function useReader(
 
     const topWindow = getTopWindow()
     if (topWindow) {
-      tooltipTopScrollHandler = () => hideTooltip()
+      tooltipTopScrollHandler = () => {
+        hideTooltip()
+        hideLookupAction()
+      }
       topWindow.addEventListener('scroll', tooltipTopScrollHandler, { passive: true, capture: true })
     }
   }
@@ -2049,6 +2160,15 @@ export function useReader(
     return Math.max(4, Math.min(8, next))
   }
 
+  const pickLargestRect = (rects: DOMRect[]) => {
+    if (rects.length === 0) return null
+    return rects.reduce((maxRect, rect) => {
+      const currentArea = maxRect.width * maxRect.height
+      const nextArea = rect.width * rect.height
+      return nextArea > currentArea ? rect : maxRect
+    })
+  }
+
   const resolveMarkerRect = (
     span: HTMLElement,
     doc: Document,
@@ -2070,11 +2190,7 @@ export function useReader(
           )
           if (hitRect) return hitRect
         }
-        return textRects.reduce((maxRect, rect) => {
-          const currentArea = maxRect.width * maxRect.height
-          const nextArea = rect.width * rect.height
-          return nextArea > currentArea ? (rect as DOMRect) : maxRect
-        }, textRects[0] as DOMRect)
+        return (pickLargestRect(textRects as DOMRect[]) || textRects[0]) as DOMRect
       }
     } finally {
       range.detach?.()
@@ -2082,30 +2198,27 @@ export function useReader(
     return spanRect
   }
 
-  const buildVirtualReference = (
-    span: HTMLElement,
-    doc: Document,
-    anchorPoint?: { x: number; y: number }
-  ) => {
+  const buildVirtualReference = (rect: DOMRect, doc: Document, anchorPoint?: { x: number; y: number }) => {
     return {
       getBoundingClientRect: () => {
-        const markerRect = resolveMarkerRect(span, doc, anchorPoint)
         const frameEl = doc.defaultView?.frameElement as HTMLElement | null
         const frameRect = frameEl?.getBoundingClientRect()
         const offsetLeft = frameRect ? frameRect.left : 0
         const offsetTop = frameRect ? frameRect.top : 0
-        const hasAnchorPoint = Boolean(anchorPoint)
+        const minX = rect.left + 1
+        const maxX = rect.right - 1
+        const safeMinX = Math.min(minX, maxX)
+        const safeMaxX = Math.max(minX, maxX)
         const clampX = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-        const anchorXInDoc =
-          hasAnchorPoint && anchorPoint
-            ? clampX(anchorPoint.x, markerRect.left + 1, markerRect.right - 1)
-            : markerRect.left + markerRect.width / 2
+        const anchorXInDoc = anchorPoint
+          ? clampX(anchorPoint.x, safeMinX, safeMaxX)
+          : rect.left + rect.width / 2
         // 纵向始终锚定单词文本框本身，避免 tooltip 覆盖单词
-        const anchorTopInDoc = markerRect.top
+        const anchorTopInDoc = rect.top
         const left = anchorXInDoc + offsetLeft
         const top = anchorTopInDoc + offsetTop
         const width = 1
-        const height = Math.max(1, markerRect.height)
+        const height = Math.max(1, rect.height)
         return {
           x: left,
           y: top,
@@ -2122,8 +2235,8 @@ export function useReader(
     }
   }
 
-  const showTooltipForSpan = async (
-    span: HTMLElement,
+  const showTooltipForReference = async (
+    referenceRect: DOMRect,
     doc: Document,
     meaning: string,
     anchorPoint?: { x: number; y: number }
@@ -2134,7 +2247,7 @@ export function useReader(
     tooltip.dataset.show = 'true'
 
     const boundary = getTooltipBoundary()
-    const virtualReference = buildVirtualReference(span, doc, anchorPoint)
+    const virtualReference = buildVirtualReference(referenceRect, doc, anchorPoint)
     const updatePosition = async () => {
       const middleware = [
         offset(getTooltipOffsetPx()),
@@ -2168,6 +2281,16 @@ export function useReader(
     }
     await updatePosition()
     tooltipCleanup = autoUpdate(virtualReference, tooltip, updatePosition)
+  }
+
+  const showTooltipForSpan = async (
+    span: HTMLElement,
+    doc: Document,
+    meaning: string,
+    anchorPoint?: { x: number; y: number }
+  ) => {
+    const markerRect = resolveMarkerRect(span, doc, anchorPoint)
+    await showTooltipForReference(markerRect, doc, meaning, anchorPoint)
   }
 
   const showTooltipForShiftHover = (doc: Document, state: ShiftTooltipDocState) => {
@@ -2208,6 +2331,398 @@ export function useReader(
     doc.removeEventListener('keydown', state.keydownHandler)
     doc.removeEventListener('keyup', state.keyupHandler)
     shiftTooltipDocStates.delete(doc)
+  }
+
+  const extractLookupWord = (raw: string) => {
+    const compact = raw.replace(/\s+/g, ' ').trim()
+    if (!compact) return null
+    const tokens = compact.match(/[A-Za-z]+(?:[’'][A-Za-z]+)*/g) || []
+    if (tokens.length !== 1) return null
+    const rawWord = tokens[0] || ''
+    const normalizedWord = normalizeWordKey(rawWord)
+    if (!rawWord || !normalizedWord) return null
+    return {
+      rawWord,
+      normalizedWord
+    }
+  }
+
+  const resolveRangeRect = (range: Range | null) => {
+    if (!range) return null
+    const rects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0)
+    const bestRect = pickLargestRect(rects as DOMRect[])
+    if (bestRect) return bestRect
+    const fallbackRect = range.getBoundingClientRect()
+    if (fallbackRect.width <= 0 && fallbackRect.height <= 0) return null
+    return fallbackRect
+  }
+
+  const resolveSelectionLookupCandidate = (doc: Document): ManualLookupCandidate | null => {
+    const selection = doc.getSelection()
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return null
+    const parsed = extractLookupWord(selection.toString())
+    if (!parsed) return null
+    const range = selection.getRangeAt(0)
+    const anchorRect = resolveRangeRect(range)
+    if (!anchorRect) return null
+    return {
+      rawWord: parsed.rawWord,
+      normalizedWord: parsed.normalizedWord,
+      anchorRect,
+      anchorPoint: {
+        x: anchorRect.left + anchorRect.width / 2,
+        y: anchorRect.top + anchorRect.height / 2
+      }
+    }
+  }
+
+  const resolveWordFromTextNode = (
+    doc: Document,
+    textNode: Text,
+    offset: number,
+    anchorPoint?: { x: number; y: number },
+    markerEl?: HTMLElement | null
+  ): ManualLookupCandidate | null => {
+    const value = textNode.nodeValue || ''
+    if (!value) return null
+
+    const isWordChar = (char: string) => /[A-Za-z’']/.test(char)
+    const maxIndex = value.length - 1
+    if (maxIndex < 0) return null
+    let cursor = Math.max(0, Math.min(maxIndex, offset))
+    if (!isWordChar(value[cursor] || '')) {
+      if (cursor > 0 && isWordChar(value[cursor - 1] || '')) {
+        cursor -= 1
+      } else if (cursor < maxIndex && isWordChar(value[cursor + 1] || '')) {
+        cursor += 1
+      } else {
+        return null
+      }
+    }
+
+    let start = cursor
+    while (start > 0 && isWordChar(value[start - 1] || '')) {
+      start -= 1
+    }
+    let end = cursor + 1
+    while (end < value.length && isWordChar(value[end] || '')) {
+      end += 1
+    }
+    const parsed = extractLookupWord(value.slice(start, end))
+    if (!parsed) return null
+
+    const range = doc.createRange()
+    let anchorRect: DOMRect | null = null
+    try {
+      range.setStart(textNode, start)
+      range.setEnd(textNode, end)
+      anchorRect = resolveRangeRect(range)
+    } finally {
+      range.detach?.()
+    }
+
+    if (!anchorRect) return null
+    return {
+      rawWord: parsed.rawWord,
+      normalizedWord: parsed.normalizedWord,
+      anchorRect,
+      anchorPoint,
+      markerEl
+    }
+  }
+
+  const resolveTouchLookupCandidate = (
+    doc: Document,
+    state: ManualLookupDocState
+  ): ManualLookupCandidate | null => {
+    const point = state.touchPoint
+    if (!point) return null
+
+    const touchTargetEl = state.touchTarget instanceof Element ? (state.touchTarget as Element) : null
+    const markerEl = touchTargetEl?.closest<HTMLElement>('[data-meaning-key]')
+    if (markerEl) {
+      const parsed = extractLookupWord(markerEl.dataset.rawWord || markerEl.textContent || '')
+      if (!parsed) return null
+      return {
+        rawWord: parsed.rawWord,
+        normalizedWord: parsed.normalizedWord,
+        anchorRect: markerEl.getBoundingClientRect(),
+        anchorPoint: point,
+        markerEl
+      }
+    }
+
+    const webkitDoc = doc as Document & {
+      caretRangeFromPoint?: (x: number, y: number) => Range | null
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null
+    }
+    let range: Range | null = null
+    if (typeof webkitDoc.caretRangeFromPoint === 'function') {
+      range = webkitDoc.caretRangeFromPoint(point.x, point.y)
+    } else if (typeof webkitDoc.caretPositionFromPoint === 'function') {
+      const position = webkitDoc.caretPositionFromPoint(point.x, point.y)
+      if (position?.offsetNode) {
+        range = doc.createRange()
+        range.setStart(position.offsetNode, position.offset)
+        range.collapse(true)
+      }
+    }
+    if (!range) return null
+
+    const container = range.startContainer
+    if (container.nodeType === Node.TEXT_NODE) {
+      return resolveWordFromTextNode(doc, container as Text, range.startOffset, point, null)
+    }
+    if (container.nodeType === Node.ELEMENT_NODE) {
+      const element = container as Element
+      const safeOffset = Math.max(0, Math.min(element.childNodes.length, range.startOffset))
+      const neighbors = [element.childNodes[safeOffset], element.childNodes[safeOffset - 1]].filter(
+        Boolean
+      ) as Node[]
+      for (const node of neighbors) {
+        if (node.nodeType !== Node.TEXT_NODE) continue
+        const textNode = node as Text
+        const localOffset = node === element.childNodes[safeOffset] ? 0 : textNode.nodeValue?.length || 0
+        const resolved = resolveWordFromTextNode(doc, textNode, localOffset, point, null)
+        if (resolved) return resolved
+      }
+    }
+    return null
+  }
+
+  const showManualLookupMeaning = async (
+    doc: Document,
+    candidate: ManualLookupCandidate,
+    meaning: string
+  ) => {
+    if (candidate.markerEl) {
+      await showTooltipForSpan(candidate.markerEl, doc, meaning, candidate.anchorPoint)
+      return
+    }
+    await showTooltipForReference(candidate.anchorRect, doc, meaning, candidate.anchorPoint)
+  }
+
+  const lookupManualWordMeaning = async (rawWord: string, normalizedWord: string) => {
+    const cached = manualMeaningCache.get(normalizedWord)
+    if (cached) return cached
+    const pending = manualMeaningPendingMap.get(normalizedWord)
+    if (pending) return pending
+
+    const requestPromise = enqueueDefinitionTask(async () => {
+      const vocabularySize = await resolveVocabularyThreshold()
+      const response = await requestSentenceDefinition({
+        text: rawWord,
+        annotatedText: `[${rawWord}]`,
+        targetWords: [normalizedWord],
+        vocabularySize
+      })
+      const meaningMap = normalizeMeaningMap(response.meaning || {})
+      const resolvedMeaning = meaningMap[normalizedWord]
+      if (!resolvedMeaning) {
+        throw new Error(`模型未返回 ${normalizedWord} 的释义`)
+      }
+      manualMeaningCache.set(normalizedWord, resolvedMeaning)
+      clearApiError()
+      return resolvedMeaning
+    })
+      .catch((error) => {
+        const status = (error as Error & { status?: number }).status
+        const body = (error as Error & { body?: string }).body
+        if (isRateLimitError(status, body)) {
+          bumpBackoff(body || String(error))
+        }
+        if (status || body) {
+          showApiError(buildApiErrorMessage(status, body))
+        } else {
+          showApiError('长按查词失败，请稍后重试')
+        }
+        // eslint-disable-next-line no-console
+        console.warn('长按查词失败', { rawWord, normalizedWord, error })
+        return null
+      })
+      .finally(() => {
+        manualMeaningPendingMap.delete(normalizedWord)
+      })
+
+    manualMeaningPendingMap.set(normalizedWord, requestPromise)
+    return requestPromise
+  }
+
+  const resolveManualLookupCandidate = (
+    doc: Document,
+    state: ManualLookupDocState,
+    preferSelection = true
+  ) => {
+    const primaryCandidate = preferSelection
+      ? resolveSelectionLookupCandidate(doc)
+      : resolveTouchLookupCandidate(doc, state)
+    const fallbackCandidate = preferSelection
+      ? resolveTouchLookupCandidate(doc, state)
+      : resolveSelectionLookupCandidate(doc)
+    return primaryCandidate || fallbackCandidate
+  }
+
+  const showLookupActionForCandidate = async (
+    doc: Document,
+    state: ManualLookupDocState,
+    candidate: ManualLookupCandidate
+  ) => {
+    hideTooltip()
+    const actionEl = ensureLookupActionElement()
+    if (!actionEl) return
+    pendingLookupAction = {
+      doc,
+      state,
+      candidate
+    }
+    actionEl.dataset.show = 'true'
+
+    const boundary = getTooltipBoundary()
+    const virtualReference = buildVirtualReference(candidate.anchorRect, doc, candidate.anchorPoint)
+    const updatePosition = async () => {
+      const { x, y } = await computePosition(virtualReference, actionEl, {
+        placement: 'top',
+        strategy: 'fixed',
+        middleware: [
+          offset(12),
+          flip(boundary ? { boundary, padding: 8 } : undefined),
+          shift(boundary ? { boundary, padding: 8 } : { padding: 8 })
+        ]
+      })
+      actionEl.style.left = `${Math.round(x)}px`
+      actionEl.style.top = `${Math.round(y)}px`
+    }
+
+    if (lookupActionCleanup) {
+      lookupActionCleanup()
+      lookupActionCleanup = null
+    }
+    await updatePosition()
+    lookupActionCleanup = autoUpdate(virtualReference, actionEl, updatePosition)
+  }
+
+  const triggerManualLookupByCandidate = async (
+    doc: Document,
+    state: ManualLookupDocState,
+    candidate: ManualLookupCandidate
+  ) => {
+    hideLookupAction()
+
+    const now = Date.now()
+    if (candidate.normalizedWord === state.lastLookupWord && now - state.lastLookupAt < manualLookupDedupMs) {
+      return
+    }
+    state.lastLookupWord = candidate.normalizedWord
+    state.lastLookupAt = now
+
+    const markerMeaning = candidate.markerEl ? markerMeaningMap.get(candidate.markerEl) : ''
+    if (markerMeaning) {
+      await showManualLookupMeaning(doc, candidate, markerMeaning)
+      return
+    }
+
+    await showManualLookupMeaning(doc, candidate, '查询中...')
+    const meaning = await lookupManualWordMeaning(candidate.rawWord, candidate.normalizedWord)
+    if (!meaning) {
+      hideTooltip()
+      return
+    }
+    await showManualLookupMeaning(doc, candidate, meaning)
+  }
+
+  const openManualLookupAction = async (
+    doc: Document,
+    state: ManualLookupDocState,
+    preferSelection = true
+  ) => {
+    const candidate = resolveManualLookupCandidate(doc, state, preferSelection)
+    if (!candidate) {
+      hideLookupAction()
+      return
+    }
+    await showLookupActionForCandidate(doc, state, candidate)
+  }
+
+  const clearManualLookupTouchTimer = (state: ManualLookupDocState) => {
+    if (!state.touchTimer) return
+    clearTimeout(state.touchTimer)
+    state.touchTimer = null
+  }
+
+  const ensureManualLookupHandlers = (doc: Document) => {
+    if (manualLookupDocStates.has(doc)) return
+
+    const state: ManualLookupDocState = {
+      touchPoint: null,
+      touchTarget: null,
+      touchTimer: null,
+      lastLongPressAt: 0,
+      lastLookupWord: '',
+      lastLookupAt: 0,
+      touchstartHandler: () => {},
+      touchmoveHandler: () => {},
+      touchendHandler: () => {},
+      touchcancelHandler: () => {},
+      selectionchangeHandler: () => {}
+    }
+
+    state.touchstartHandler = (event: TouchEvent) => {
+      if (event.touches.length !== 1) return
+      hideLookupAction()
+      const touch = event.touches[0]
+      state.touchPoint = { x: touch.clientX, y: touch.clientY }
+      state.touchTarget = event.target
+      clearManualLookupTouchTimer(state)
+      state.touchTimer = setTimeout(() => {
+        state.lastLongPressAt = Date.now()
+        void openManualLookupAction(doc, state, true)
+      }, longPressDelayMs)
+    }
+
+    state.touchmoveHandler = (event: TouchEvent) => {
+      if (event.touches.length !== 1 || !state.touchPoint) return
+      const touch = event.touches[0]
+      const deltaX = Math.abs(touch.clientX - state.touchPoint.x)
+      const deltaY = Math.abs(touch.clientY - state.touchPoint.y)
+      if (deltaX <= longPressMoveTolerancePx && deltaY <= longPressMoveTolerancePx) return
+      clearManualLookupTouchTimer(state)
+    }
+
+    const clearTouchState = () => {
+      clearManualLookupTouchTimer(state)
+      state.touchPoint = null
+      state.touchTarget = null
+    }
+
+    state.touchendHandler = clearTouchState
+    state.touchcancelHandler = clearTouchState
+    state.selectionchangeHandler = () => {
+      const elapsed = Date.now() - state.lastLongPressAt
+      if (elapsed > selectionLookupWindowMs) return
+      void openManualLookupAction(doc, state, true)
+    }
+
+    doc.addEventListener('touchstart', state.touchstartHandler)
+    doc.addEventListener('touchmove', state.touchmoveHandler)
+    doc.addEventListener('touchend', state.touchendHandler)
+    doc.addEventListener('touchcancel', state.touchcancelHandler)
+    doc.addEventListener('selectionchange', state.selectionchangeHandler)
+    manualLookupDocStates.set(doc, state)
+  }
+
+  const removeManualLookupHandlers = (doc: Document) => {
+    const state = manualLookupDocStates.get(doc)
+    if (!state) return
+    if (pendingLookupAction?.doc === doc) {
+      hideLookupAction()
+    }
+    clearManualLookupTouchTimer(state)
+    doc.removeEventListener('touchstart', state.touchstartHandler)
+    doc.removeEventListener('touchmove', state.touchmoveHandler)
+    doc.removeEventListener('touchend', state.touchendHandler)
+    doc.removeEventListener('touchcancel', state.touchcancelHandler)
+    doc.removeEventListener('selectionchange', state.selectionchangeHandler)
+    manualLookupDocStates.delete(doc)
   }
 
   const applyDefinitionToParagraph = (doc: Document, paragraphId: string, resp: SentenceDefinitionResponse) => {
