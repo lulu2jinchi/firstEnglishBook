@@ -462,3 +462,69 @@
 
 - 在阅读器中点击任意可释义单词，不再出现背景闪烁。
 - 执行 `npm run build`，编译通过。
+
+## 2026-02-20 阿里云部署脚本未引导私钥导致 SSH 鉴权失败
+
+### 现象
+
+- 执行部署脚本连接阿里云服务器时报错：
+  - `Permission denied (publickey,gssapi-keyex,gssapi-with-mic)`
+- 脚本流程中没有明确引导用户填写 `SSH private key` 路径。
+
+### 根因
+
+- `scripts/deploy-aliyun.sh` 虽支持 `--key` 参数，但默认路径与错误提示不够显式。
+- 在未传 `--key` 的情况下，用户不容易感知“当前连接到底用了哪把密钥”。
+
+### 解决方案
+
+- 增加密钥引导：
+  - 未传 `--key` 且处于交互终端时，提示输入私钥路径（回车则走默认 `~/.ssh` 配置）。
+  - 支持环境变量 `ALIYUN_SSH_KEY` 作为默认私钥路径。
+- 增加前置连通性检查：
+  - 上传前先执行 SSH 连接校验。
+  - 失败时给出带 `--key` 的明确重试命令。
+- 增加私钥路径合法性检查：
+  - 若指定私钥文件不存在，直接报错退出。
+
+## 2026-02-20 部署脚本 scp 端口参数错误导致 `stat local "22"` 报错
+
+### 现象
+
+- 执行部署脚本时出现报错：
+  - `scp: stat local "22": No such file or directory`
+
+### 根因
+
+- 脚本复用了 `ssh` 参数数组给 `scp`。
+- `ssh` 的端口参数是 `-p`，但 `scp` 的端口参数是大写 `-P`。
+- 传入 `scp -p 22` 会把 `22` 解释成“本地文件路径”，从而触发 `stat local "22"`。
+
+### 解决方案
+
+- 在 `scripts/deploy-aliyun.sh` 中拆分参数：
+  - `SSH_OPTS` 继续使用 `-p <port>`
+  - 新增 `SCP_OPTS` 使用 `-P <port>`
+- `scp` 上传阶段改为使用 `SCP_OPTS`，避免端口被误解析为本地文件。
+
+## 2026-02-20 PM2 `restart` 失败导致首发部署中断
+
+### 现象
+
+- 服务器日志提示：
+  - `[PM2][ERROR] Process or Namespace server not found`
+- 脚本执行 `pm2 restart server` 时，首次部署因为进程尚不存在而直接失败。
+
+### 根因
+
+- `restart` 语义是“重启已有进程”，不能用于“首次启动新进程”。
+- 部署脚本没有提供“重启失败后自动启动”的兜底路径。
+
+### 解决方案
+
+- 在 `scripts/deploy-aliyun.sh` 增加 `--start` 参数：
+  - 当 `--restart` 执行失败时，自动执行 `--start` 命令。
+- 对 PM2 场景可使用：
+  - `--restart "pm2 restart server"`
+  - `--start "pm2 start .output/server/index.mjs --name server --update-env"`
+- 若未提供 `--start`，脚本会给出明确提示并退出，避免“部署成功但服务未运行”。

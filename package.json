@@ -9,7 +9,8 @@
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
     "test:case:generate": "node scripts/test-system/generate-test-case.mjs",
-    "test:cases:run": "node --experimental-strip-types scripts/test-system/run-test-cases.mjs"
+    "test:cases:run": "node --experimental-strip-types scripts/test-system/run-test-cases.mjs",
+    "deploy:aliyun": "bash scripts/deploy-aliyun.sh"
   },
   "dependencies": {
     "@floating-ui/dom": "^1.6.11",
