@@ -16,7 +16,7 @@ Always use Chinese to response.
 - app/utils/readerDefinitionCache.ts：释义缓存工具（清空 Dexie `definitions` 与跨标签广播）。
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
-- server/api/querySentenceDefination.post.ts：后端接口，调用 OpenRouter 模型生成词汇标注 JSON。
+- server/api/querySentenceDefination.post.ts：后端接口，调用可配置模型平台（默认硅基流动）生成词汇标注 JSON。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - server/assets/prompt.md：部署环境使用的 prompt 模板。
 - scripts/test-system/generate-test-case.mjs：AI 生成测试用例描述（test.md）与自动化脚本（test.ts）。

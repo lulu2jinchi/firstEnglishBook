@@ -4,7 +4,20 @@ import path from 'node:path'
 const TEST_ROOT = path.resolve('reader-test')
 const CASES_DIR = path.join(TEST_ROOT, 'test-cases')
 const DEFAULT_MODEL = "Qwen/Qwen3-14B"
-const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1/chat/completions'
+const DEFAULT_PROVIDER = (process.env.TEST_AI_PROVIDER || process.env.LLM_PROVIDER || 'siliconflow').toLowerCase()
+const PROVIDER_BASE_URLS = {
+  siliconflow: 'https://api.siliconflow.cn/v1/chat/completions',
+  openrouter: 'https://openrouter.ai/api/v1/chat/completions'
+}
+const toChatCompletionsUrl = (baseUrl) => {
+  const normalized = String(baseUrl || '').trim().replace(/\/+$/, '')
+  if (!normalized) return ''
+  return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`
+}
+const DEFAULT_BASE_URL =
+  toChatCompletionsUrl(process.env.TEST_AI_BASE_URL || process.env.LLM_BASE_URL) ||
+  PROVIDER_BASE_URLS[DEFAULT_PROVIDER] ||
+  PROVIDER_BASE_URLS.siliconflow
 const DEFAULT_ENDPOINT = '/api/querySentenceDefination'
 const DEFAULT_TEXT = 'The old lighthouse stood against the relentless winds, its keeper devising ways to preserve the fragile glass.'
 
@@ -59,7 +72,7 @@ const parseArgs = (argv) => {
       continue
     }
     if (arg === '--base-url') {
-      out.baseUrl = String(argv[i + 1] || '').trim() || DEFAULT_BASE_URL
+      out.baseUrl = toChatCompletionsUrl(String(argv[i + 1] || '').trim()) || DEFAULT_BASE_URL
       i += 1
       continue
     }
@@ -192,7 +205,7 @@ const buildUserPrompt = ({ goal, endpoint, text, slugHint }) =>
 const generateByAi = async ({ apiKey, baseUrl, model, goal, endpoint, text, slugHint }) => {
   if (!apiKey) {
     throw new Error(
-      '缺少 API Key：请设置 TEST_AI_API_KEY/OPENROUTER_API_KEY，或在 chooseAPI.md 中提供 sk- 开头 key'
+      '缺少 API Key：请设置 TEST_AI_API_KEY/LLM_API_KEY/SILICONFLOW_API_KEY/OPENROUTER_API_KEY，或在 chooseAPI.md 中提供 sk- 开头 key'
     )
   }
 
@@ -317,6 +330,8 @@ const run = async () => {
   const apiKey =
     args.apiKey ||
     process.env.TEST_AI_API_KEY ||
+    process.env.LLM_API_KEY ||
+    process.env.SILICONFLOW_API_KEY ||
     process.env.OPENROUTER_API_KEY ||
     process.env.OPENAI_API_KEY ||
     readApiKeyFromChooseApi()

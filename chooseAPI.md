@@ -15,6 +15,17 @@
   - 未标注词使用单词级接口请求并缓存结果
   - 长按后先展示“查词”操作按钮，点击按钮后再请求并通过 tooltip 展示释义
 
+当前支持通用模型平台配置（默认硅基流动）：
+- `LLM_PROVIDER`：平台标识（如 `siliconflow` / `openrouter` / 自定义）
+- `LLM_API_KEY`：通用 API Key（可覆盖平台预设）
+- `LLM_BASE_URL`：通用 Base URL（支持写到 `/v1` 或 `/chat/completions`）
+- `LLM_MODEL`：通用模型名（可覆盖平台预设）
+- `LLM_HEADERS_JSON`：额外请求头 JSON（如 `{"X-Trace-Id":"demo"}`）
+
+平台预设变量：
+- 硅基流动：`SILICONFLOW_API_KEY` / `SILICONFLOW_BASE_URL` / `SILICONFLOW_MODEL`
+- OpenRouter：`OPENROUTER_API_KEY` / `OPENROUTER_BASE_URL` / `OPENROUTER_MODEL` / `OPENROUTER_SITE_URL` / `OPENROUTER_APP_NAME`
+
 我是硅基流动用户，我可以使用硅基流动的这些模型：
 Pro/Qwen/Qwen2.5-7B-Instruct
 deepseek-ai/DeepSeek-R1-Distill-Qwen-32B
@@ -136,7 +147,9 @@ inclusionAI/Ring-flash-2.0
 Qwen/Qwen3-8B
 FunAudioLLM/SenseVoiceSmall
 
-硅基流动的 baseUrl是xxx，api_key是xxx
+当前我使用硅基流动：
+- baseUrl：`https://api.siliconflow.cn/v1`
+- api_key：`sk-xxx`
 
 请帮我从以上模型中挑选最适合我们当前“阅读器翻译流程”的模型，并输出 Excel 报告。
 

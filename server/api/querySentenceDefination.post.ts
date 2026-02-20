@@ -128,6 +128,30 @@ const extractTargetWordsFromAnnotatedText = (text: string) => {
 
 const normalizeBaseUrl = (value: string) => value.replace(/\/+$/, '')
 
+const buildChatCompletionsUrl = (baseUrl: string) => {
+  const normalized = normalizeBaseUrl(baseUrl)
+  return normalized.endsWith('/chat/completions') ? normalized : `${normalized}/chat/completions`
+}
+
+const parseExtraHeaders = (headersJson: string) => {
+  if (!headersJson.trim()) return {}
+  try {
+    const parsed = JSON.parse(headersJson)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    const headers: Record<string, string> = {}
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value !== 'string') continue
+      const headerKey = key.trim()
+      const headerValue = value.trim()
+      if (!headerKey || !headerValue) continue
+      headers[headerKey] = headerValue
+    }
+    return headers
+  } catch {
+    return {}
+  }
+}
+
 const normalizeVocabularySize = (raw: number) => {
   if (!Number.isFinite(raw)) return null
   const rounded = Math.round(raw)
@@ -156,6 +180,50 @@ const hasExactWordKeys = (meaning: Record<string, string>, targetWords: string[]
   const expected = [...targetWords].sort()
   const actual = Object.keys(meaning).sort()
   return JSON.stringify(actual) === JSON.stringify(expected)
+}
+
+type RuntimeLlmPreset = {
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+  siteUrl?: string
+  appName?: string
+}
+
+type RuntimeLlmConfig = {
+  provider?: string
+  apiKey?: string
+  baseUrl?: string
+  model?: string
+  headersJson?: string
+}
+
+const resolveLlmConfig = () => {
+  const runtimeConfig = useRuntimeConfig() as {
+    llm?: RuntimeLlmConfig
+    llmProviders?: Record<string, RuntimeLlmPreset>
+  }
+  const llm = runtimeConfig.llm || {}
+  const provider = (llm.provider || 'siliconflow').trim().toLowerCase()
+  const presets = runtimeConfig.llmProviders || {}
+  const preset = presets[provider] || {}
+
+  const apiKey = (llm.apiKey || preset.apiKey || '').trim()
+  const baseUrl = (llm.baseUrl || preset.baseUrl || '').trim()
+  const model = (llm.model || preset.model || '').trim()
+  const siteUrl = (preset.siteUrl || '').trim()
+  const appName = (preset.appName || '').trim()
+  const extraHeaders = parseExtraHeaders(llm.headersJson || '')
+
+  return {
+    provider,
+    apiKey,
+    baseUrl,
+    model,
+    siteUrl,
+    appName,
+    extraHeaders
+  }
 }
 
 export default defineEventHandler(async (event) => {
@@ -202,23 +270,18 @@ export default defineEventHandler(async (event) => {
     } satisfies SentenceDefinitionResponse
   }
 
-  const { openrouter } = useRuntimeConfig()
-  const apiKey = openrouter.apiKey?.trim() || ''
-  const baseUrl = openrouter.baseUrl?.trim() ? normalizeBaseUrl(openrouter.baseUrl) : ''
-  const model = openrouter.model?.trim() || ''
-  const siteUrl = openrouter.siteUrl?.trim() || ''
-  const appName = openrouter.appName?.trim() || ''
+  const { provider, apiKey, baseUrl, model, siteUrl, appName, extraHeaders } = resolveLlmConfig()
 
   if (!apiKey) {
-    throw createError({ statusCode: 500, statusMessage: '服务端未配置 API Key' })
+    throw createError({ statusCode: 500, statusMessage: `服务端未配置 API Key（provider: ${provider}）` })
   }
 
   if (!baseUrl) {
-    throw createError({ statusCode: 500, statusMessage: '服务端未配置 Base URL' })
+    throw createError({ statusCode: 500, statusMessage: `服务端未配置 Base URL（provider: ${provider}）` })
   }
 
   if (!model) {
-    throw createError({ statusCode: 500, statusMessage: '服务端未配置模型名称' })
+    throw createError({ statusCode: 500, statusMessage: `服务端未配置模型名称（provider: ${provider}）` })
   }
 
   let prompt = ''
@@ -236,18 +299,19 @@ export default defineEventHandler(async (event) => {
 
   const headers: Record<string, string> = {
     Authorization: `Bearer ${apiKey}`,
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    ...extraHeaders
   }
 
-  if (siteUrl) {
+  if (provider === 'openrouter' && siteUrl) {
     headers['HTTP-Referer'] = siteUrl
   }
 
-  if (appName) {
+  if (provider === 'openrouter' && appName) {
     headers['X-Title'] = appName
   }
 
-  const response = await $fetch<ChatCompletionResponse>(`${baseUrl}/chat/completions`, {
+  const response = await $fetch<ChatCompletionResponse>(buildChatCompletionsUrl(baseUrl), {
     method: 'POST',
     headers,
     body: {

@@ -1,5 +1,36 @@
 # Bug 修复记录
 
+## 2026-02-20 模型平台切换成本高（写死单平台）
+
+### 现象
+
+- 后端释义请求链路只绑定单一平台配置，切换回硅基流动或迁移其他平台都需要反复改代码。
+- 测试脚本默认地址与鉴权变量也绑定平台，导致联调切换成本高。
+
+### 根因
+
+1. `runtimeConfig` 与 `/api/querySentenceDefination` 只读取固定平台字段。
+2. Base URL 处理假设固定为 `/v1`，未兼容“已包含 `/chat/completions`”的配置形式。
+3. 测试脚本缺少统一平台变量回退链路。
+
+### 解决方案
+
+- `nuxt.config.ts`
+  - 新增通用配置层：`LLM_PROVIDER/LLM_API_KEY/LLM_BASE_URL/LLM_MODEL/LLM_HEADERS_JSON`。
+  - 内置平台预设：`siliconflow`、`openrouter`，默认 provider 切回 `siliconflow`。
+- `server/api/querySentenceDefination.post.ts`
+  - 新增 provider 解析逻辑：通用变量优先，未配置时回退到平台预设。
+  - Base URL 自动兼容两种写法：`.../v1` 或 `.../chat/completions`。
+  - 支持通过 `LLM_HEADERS_JSON` 追加通用请求头；OpenRouter 继续注入 `HTTP-Referer/X-Title`。
+- `scripts/test-system/generate-test-case.mjs`、`scripts/evaluate-models.mjs`
+  - 增加 provider 选择与通用环境变量回退，避免测试链路锁死单平台。
+
+### 验证
+
+- 切换 `LLM_PROVIDER=siliconflow` 时，无需改代码即可走硅基流动。
+- 切换 `LLM_PROVIDER=openrouter` 或覆盖 `LLM_BASE_URL/LLM_API_KEY` 时，可复用同一后端逻辑。
+- 执行 `npm run build`，编译通过。
+
 ## 2026-02-19 自动释义漏词时无法手动查词
 
 ### 现象
