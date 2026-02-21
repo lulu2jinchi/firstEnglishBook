@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>内八和外八的故事</title>
+    <meta
+      name="description"
+      content="内八和外八的故事，个人生活记录展示页面。"
+    />
+    <style>
+      :root {
+        --bg-1: #fff8f3;
+        --bg-2: #ffe8df;
+        --card: rgba(255, 255, 255, 0.9);
+        --text: #4a2e2e;
+        --muted: #7d5c5c;
+        --accent: #d66775;
+        --line: rgba(214, 103, 117, 0.2);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: var(--text);
+        font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        background:
+          radial-gradient(circle at 12% 18%, #ffffff 0, rgba(255, 255, 255, 0) 36%),
+          linear-gradient(160deg, var(--bg-1), var(--bg-2));
+      }
+
+      .page {
+        width: min(920px, 100% - 32px);
+        margin: 0 auto;
+        padding: 42px 0 56px;
+      }
+
+      .hero,
+      .timeline,
+      .note {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        box-shadow: 0 14px 30px rgba(74, 46, 46, 0.08);
+      }
+
+      .hero {
+        padding: 28px 24px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(30px, 4vw, 44px);
+      }
+
+      .subtitle {
+        margin: 12px 0 0;
+        color: var(--muted);
+        line-height: 1.7;
+      }
+
+      .timeline {
+        margin-top: 16px;
+        padding: 20px;
+      }
+
+      .timeline h2,
+      .note h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .timeline ul {
+        margin: 0;
+        padding-left: 18px;
+        line-height: 1.9;
+      }
+
+      .timeline li + li {
+        margin-top: 6px;
+      }
+
+      .note {
+        margin-top: 16px;
+        padding: 20px;
+      }
+
+      .note p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      .signature {
+        margin-top: 18px;
+        text-align: right;
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      footer {
+        margin-top: 20px;
+        font-size: 13px;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          width: min(920px, 100% - 20px);
+          padding: 24px 0 34px;
+        }
+
+        .hero,
+        .timeline,
+        .note {
+          border-radius: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <h1>内八和外八的故事</h1>
+       
+      </section>
+
+      <section class="timeline" aria-label="我们的故事">
+        <h2>我们的故事</h2>
+        <ul>
+          <li>
+            我的老公是个内八，他是因为出生的时候早产缺氧肌张力高。
+          </li>
+          <li>
+            我是个外八，我是小时候吹葫芦丝表演，老师说站得时候要外八站，从那时候我把外八当成了优雅，就一直优雅下来了。
+          </li>
+          <li>
+            我们两个在一起，真是登对。
+          </li>
+          <li>
+            感谢他的内八让他在遇见我之前没有机会接触其他女人。我遇见他之前也没正经谈过恋爱，首要原因倒不是外八，而且性格。哈哈哈哈，我是疯丫头。
+          </li>
+          <li>
+            我老公比我大四岁，今年已经32了，但是他还是像个小孩，我也像个小孩，我们两个在一起就像两个小孩过家家，过很幸福的家家。
+          </li>
+          <li>
+            他给自己取名廖炸弹。
+          </li>
+          <li>
+            廖炸弹每天晚上睡觉都要抱我，冬天天气很冷，他贴着我的背我就很温暖，真好。
+          </li>
+        </ul>
+      </section>
+
+      <section class="note">
+        <h2>我们家的逆子</h2>
+        <p>
+          我们有一只狸花猫，叫王富贵，是只凶神恶煞的逆子。随时准备突击咬我们，外人不咬，只咬我们。坏呀，坏呀。
+        </p>
+       
+      </section>
+
+      <footer>更新时间：2026-02-21</footer>
+    </div>
+  </body>
+</html>

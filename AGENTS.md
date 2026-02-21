@@ -4,7 +4,8 @@ Always use Chinese to response.
 
 项目目录结构（需随结构调整同步更新本文件）：
 - app/app.vue：入口，渲染路由页面。
-- app/pages/index.vue：产品官网页（看吧阅读器品牌介绍与入口）。
+- app/pages/index.vue：根路由兜底页（客户端跳转到备案静态展示页）。
+- app/pages/official.vue：产品官网页（看吧阅读器品牌介绍与入口）。
 - app/pages/home.vue：书架首页（Figma 书架布局）。
 - app/pages/user.vue：个人中心页面，设置词汇量（浏览器本地）与模型配置。
 - app/pages/reader.vue：阅读器路由，挂载 ReaderShell 组件。
@@ -17,6 +18,7 @@ Always use Chinese to response.
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用可配置模型平台（默认硅基流动）生成词汇标注 JSON。
+- server/routes/index.get.ts：根路径备案展示页直出路由，返回 `public/beian-love-record.html`。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - server/assets/prompt.md：部署环境使用的 prompt 模板。
 - scripts/test-system/generate-test-case.mjs：AI 生成测试用例描述（test.md）与自动化脚本（test.ts）。
@@ -27,6 +29,7 @@ Always use Chinese to response.
 - reader-test/test-cases-runs/<run-id>/report.md：每次执行后的测试报告。
 - vendor/epubjs/：本地 fork 的 epub.js 源码（当前对齐 upstream `v0.3.93`，用于后续定制功能开发）。
 - public/landing/example.png：官网“阅读器释义示意图”静态资源。
+- public/beian-love-record.html：备案用纯静态展示页（颜璐与廖彬彬的生活记录）。
 - nuxt.config.ts、package.json、public/ 等保持默认 Nuxt 配置与静态资源。
 
 API 测试（curl）：
