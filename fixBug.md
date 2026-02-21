@@ -1,5 +1,33 @@
 # Bug 修复记录
 
+## 2026-02-20 meaning 键集合不一致导致接口 502
+
+### 现象
+
+- 调用 `/api/querySentenceDefination` 时，偶发返回 `502`：
+  - `大模型返回 meaning 键集合与 targetWords 不一致`
+- 前端提示“接口请求失败”，对应段落释义无法展示。
+
+### 根因
+
+1. 后端对模型输出使用“严格全等校验”，`meaning` 与 `targetWords` 任一键不一致就直接失败。
+2. 大模型在真实场景会出现轻微偏差（多返键、少返键、键名格式偏差），导致请求被误判失败。
+
+### 解决方案
+
+- `server/api/querySentenceDefination.post.ts`
+  - 新增 `alignMeaningToTargetWords`：
+    - 以 `targetWords` 为准过滤多余键；
+    - 对可归并键（如撇号/连字符差异）做别名匹配；
+    - 对仍缺失的键补兜底释义文案，保证返回结构可渲染。
+  - 移除“键集合不一致直接抛 502”的硬失败逻辑。
+  - 保留 `console.warn` 告警，记录 `missingWords/extraWords/aliasMatchedPairs` 便于追踪模型质量。
+
+### 验证
+
+- 当模型返回键集合与 `targetWords` 存在偏差时，接口不再因为该问题直接 `502`。
+- 返回体 `meaning` 键集合始终对齐 `targetWords`，前端可继续渲染。
+
 ## 2026-02-20 模型平台切换成本高（写死单平台）
 
 ### 现象

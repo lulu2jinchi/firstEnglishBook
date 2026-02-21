@@ -10,6 +10,9 @@
 ```text
 reader-test/
   test-cases/
+    should-align-meaning-keys-to-target-words/
+      test.md
+      test.ts
     should-return-meaning-json/
       test.md
       test.ts

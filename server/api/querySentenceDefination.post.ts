@@ -176,10 +176,56 @@ const normalizeMeaningMap = (raw: unknown) => {
   return meaning
 }
 
-const hasExactWordKeys = (meaning: Record<string, string>, targetWords: string[]) => {
-  const expected = [...targetWords].sort()
-  const actual = Object.keys(meaning).sort()
-  return JSON.stringify(actual) === JSON.stringify(expected)
+const buildWordAlias = (word: string) => word.replace(/['-]/g, '')
+
+const buildMissingMeaningFallback = (word: string) => `该词释义暂未生成，请重试（${word}）`
+
+const alignMeaningToTargetWords = (meaning: Record<string, string>, targetWords: string[]) => {
+  const expectedSet = new Set(targetWords)
+  const usedMeaningKeys = new Set<string>()
+  const aliasBuckets = new Map<string, Array<{ key: string; value: string }>>()
+
+  for (const [key, value] of Object.entries(meaning)) {
+    const alias = buildWordAlias(key)
+    if (!alias) continue
+    const bucket = aliasBuckets.get(alias) || []
+    bucket.push({ key, value })
+    aliasBuckets.set(alias, bucket)
+  }
+
+  const alignedMeaning: Record<string, string> = {}
+  const missingWords: string[] = []
+  const aliasMatchedPairs: string[] = []
+
+  for (const word of targetWords) {
+    const directValue = meaning[word]
+    if (directValue) {
+      alignedMeaning[word] = directValue
+      usedMeaningKeys.add(word)
+      continue
+    }
+
+    const alias = buildWordAlias(word)
+    const aliasCandidate = (aliasBuckets.get(alias) || []).find((item) => !usedMeaningKeys.has(item.key))
+    if (aliasCandidate) {
+      alignedMeaning[word] = aliasCandidate.value
+      usedMeaningKeys.add(aliasCandidate.key)
+      aliasMatchedPairs.push(`${word}<-${aliasCandidate.key}`)
+      continue
+    }
+
+    alignedMeaning[word] = buildMissingMeaningFallback(word)
+    missingWords.push(word)
+  }
+
+  const extraWords = Object.keys(meaning).filter((key) => !expectedSet.has(key))
+
+  return {
+    meaning: alignedMeaning,
+    missingWords,
+    extraWords,
+    aliasMatchedPairs
+  }
 }
 
 type RuntimeLlmPreset = {
@@ -350,12 +396,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 502, statusMessage: '大模型返回缺少 meaning 对象' })
   }
 
-  if (!hasExactWordKeys(meaning, targetWords)) {
-    throw createError({ statusCode: 502, statusMessage: '大模型返回 meaning 键集合与 targetWords 不一致' })
+  const alignedMeaning = alignMeaningToTargetWords(meaning, targetWords)
+  if (
+    alignedMeaning.missingWords.length > 0 ||
+    alignedMeaning.extraWords.length > 0 ||
+    alignedMeaning.aliasMatchedPairs.length > 0
+  ) {
+    // eslint-disable-next-line no-console
+    console.warn('大模型返回 meaning 键集合已自动对齐 targetWords', {
+      missingWords: alignedMeaning.missingWords,
+      extraWords: alignedMeaning.extraWords,
+      aliasMatchedPairs: alignedMeaning.aliasMatchedPairs
+    })
   }
 
   return {
     sentence: annotatedText,
-    meaning
+    meaning: alignedMeaning.meaning
   } satisfies SentenceDefinitionResponse
 })
