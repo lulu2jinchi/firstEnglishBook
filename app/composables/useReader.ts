@@ -158,7 +158,7 @@ const isEpubBlobUrl = (path: string) => /^blob:/i.test(path)
 const locationStoragePrefix = 'first-english-book-location:'
 const minVocabularySize = 1000
 const maxVocabularySize = 20000
-const fallbackVocabularySize = 6000
+const fallbackVocabularySize = 4000
 const properNounFilterMode: ProperNounFilterMode = 'person_only'
 const nonNameWhitelist = new Set<string>([
   'i',

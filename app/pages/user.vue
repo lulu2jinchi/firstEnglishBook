@@ -65,7 +65,7 @@ const minVocabularySize = 1000
 const maxVocabularySize = 20000
 const rangeStep = 500
 const inputStep = 100
-const fallbackVocabularySize = 6000
+const fallbackVocabularySize = 4000
 
 const vocabularySize = ref(fallbackVocabularySize)
 const saveStatus = ref('')

@@ -6,7 +6,7 @@
   - `text`: 选中的原始单词（如 `fragile`）
   - `annotatedText`: 仅该词带中括号（如 `[fragile]`）
   - `targetWords`: 小写去重数组（如 `["fragile"]`）
-  - `vocabularySize`: 当前词汇量阈值（如 `6000`）
+  - `vocabularySize`: 当前词汇量阈值（如 `4000`）
 - 返回约束保持一致：
   - `sentence` 必须与 `annotatedText` 严格一致（服务端会强制回传 `annotatedText`）
   - `meaning` 必须是对象，且键集合与 `targetWords` 完全一致
@@ -163,7 +163,7 @@ FunAudioLLM/SenseVoiceSmall
      - `person_only`：仅过滤人名（默认）；
      - `all_proper_nouns`：过滤全部专有名词候选（更激进）；
    - 用 public/coca-20000.json 查词频 rank；
-   - 阈值使用用户词汇量（默认 6000）；
+   - 阈值使用用户词汇量（默认 4000）；
    - 规则：rank <= 阈值不标注，rank > 阈值或未收录（null）才标注；
    - 同一词（小写词元）只标第一次；
    - 产出 annotatedText（例如 [word]）和 targetWords（小写去重数组）。

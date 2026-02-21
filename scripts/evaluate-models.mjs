@@ -20,7 +20,7 @@ const ENDPOINT =
   toChatCompletionsUrl(process.env.MODEL_EVAL_ENDPOINT || process.env.LLM_BASE_URL) ||
   EVAL_PROVIDER_ENDPOINTS[EVAL_PROVIDER] ||
   EVAL_PROVIDER_ENDPOINTS.siliconflow
-const VOCAB_THRESHOLD = 6000
+const VOCAB_THRESHOLD = 4000
 const MODEL_TIMEOUT_MS = 120000
 
 const SAMPLE_TEXT = `She turns and walks down the hall. He follows her, closing the door behind him. Down a few steps in the kitchen, his mother Lorraine is peeling off a pair of rubber gloves. Marianne hops onto the countertop and picks up an open jar of chocolate spread, in which she has left a teaspoon.
