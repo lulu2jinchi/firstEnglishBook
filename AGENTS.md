@@ -18,7 +18,7 @@ Always use Chinese to response.
 - server/api/readerLevel.get.ts：读取 prompt.md 的词汇量水平配置。
 - server/api/readerLevel.post.ts：更新 prompt.md 的词汇量水平配置。
 - server/api/querySentenceDefination.post.ts：后端接口，调用可配置模型平台（默认硅基流动）生成词汇标注 JSON。
-- server/routes/index.get.ts：根路径备案展示页直出路由，返回 `public/beian-love-record.html`。
+- server/routes/index.get.ts：根路径备案展示路由，重定向到静态页 `/beian-love-record.html`。
 - server/utils/prompt.ts：读写 prompt.md 并解析/更新英语水平。
 - server/assets/prompt.md：部署环境使用的 prompt 模板。
 - scripts/test-system/generate-test-case.mjs：AI 生成测试用例描述（test.md）与自动化脚本（test.ts）。

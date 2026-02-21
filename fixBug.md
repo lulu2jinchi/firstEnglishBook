@@ -1,5 +1,29 @@
 # Bug 修复记录
 
+## 2026-02-21 根路径备案页在生产环境 500（ENOENT）
+
+### 现象
+
+- 访问 `http://47.108.150.160:3000/` 返回 `500`。
+- 错误信息：`ENOENT: no such file or directory, open '/opt/firstEnglishBook/public/beian-love-record.html'`。
+
+### 根因
+
+1. `server/routes/index.get.ts` 通过 `process.cwd()/public/beian-love-record.html` 读取文件。
+2. 线上部署通常只上传 `.output`，不会包含源码根目录下的 `public/`，导致运行时路径不存在。
+
+### 解决方案
+
+- `server/routes/index.get.ts`
+  - 去掉运行时磁盘读文件逻辑。
+  - 改为根路径 `302` 重定向到静态资源 `/beian-love-record.html`。
+- 由 Nitro 的静态资源机制直接提供页面内容，避免依赖 `process.cwd()` 的文件结构。
+
+### 验证
+
+- 本地 `npm run build` 通过。
+- 访问 `/` 将跳转到 `/beian-love-record.html`，不再触发 ENOENT。
+
 ## 2026-02-20 meaning 键集合不一致导致接口 502
 
 ### 现象
