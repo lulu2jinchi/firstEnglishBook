@@ -15,7 +15,7 @@ usage() {
   --restart   部署后执行的重启命令
               默认: systemctl restart server
   --start     当重启命令失败时执行的启动命令（用于首发部署）
-  --nginx-80-proxy  部署后自动配置 Nginx 监听 80 并反代到应用端口
+  --nginx-80-proxy  部署后自动配置 Nginx 监听 80（`/` 直出备案静态页，其余请求反代到应用端口）
   --server-name     Nginx server_name（默认 "_"）
   --upstream-port   应用端口（默认 3000）
   --port      SSH 端口（默认 22）
@@ -160,7 +160,7 @@ ssh "${SSH_OPTS[@]}" "$HOST" "set -e; cd '$REMOTE_PATH'; rm -rf .output; tar -xz
 
 if [[ "$ENABLE_NGINX_80_PROXY" == "true" ]]; then
   echo "[6/6] 配置服务器 Nginx: 80 -> 127.0.0.1:$UPSTREAM_PORT"
-  ssh "${SSH_OPTS[@]}" "$HOST" "set -e; SERVER_NAME='$NGINX_SERVER_NAME' UPSTREAM_PORT='$UPSTREAM_PORT' bash -s" <<'EOF'
+  ssh "${SSH_OPTS[@]}" "$HOST" "set -e; SERVER_NAME='$NGINX_SERVER_NAME' UPSTREAM_PORT='$UPSTREAM_PORT' STATIC_ROOT='$REMOTE_PATH/.output/public' bash -s" <<'EOF'
 set -euo pipefail
 
 if ! command -v nginx >/dev/null 2>&1; then
@@ -184,10 +184,25 @@ if [[ "$(id -u)" -ne 0 ]]; then
   fi
 fi
 
+if [[ ! -f "${STATIC_ROOT}/beian-love-record.html" ]]; then
+  echo "错误: 未找到备案静态页 ${STATIC_ROOT}/beian-love-record.html" >&2
+  exit 1
+fi
+
 cat <<CONF | $WRITER "$CONF_PATH" >/dev/null
 server {
   listen 80;
   server_name ${SERVER_NAME};
+
+  location = / {
+    root ${STATIC_ROOT};
+    try_files /beian-love-record.html =404;
+  }
+
+  location = /beian-love-record.html {
+    root ${STATIC_ROOT};
+    try_files /beian-love-record.html =404;
+  }
 
   location / {
     proxy_pass http://127.0.0.1:${UPSTREAM_PORT};
@@ -198,13 +213,15 @@ server {
     proxy_set_header X-Forwarded-Proto \$scheme;
     proxy_set_header Upgrade \$http_upgrade;
     proxy_set_header Connection "upgrade";
+    proxy_intercept_errors on;
+    error_page 502 503 504 =200 /beian-love-record.html;
   }
 }
 CONF
 
 $TESTER
 $RELOADER
-echo "Nginx 已配置: 80 -> 127.0.0.1:${UPSTREAM_PORT}"
+echo "Nginx 已配置: / 直出备案页，其余请求反代 127.0.0.1:${UPSTREAM_PORT}"
 EOF
 fi
 
