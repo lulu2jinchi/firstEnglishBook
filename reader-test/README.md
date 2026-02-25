@@ -216,9 +216,16 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 编辑模式下点击书籍不应误触发进入阅读页
 
 - 目标页面：`/`
+- 场景：检查默认入口路由
+- 关注点：
+  - 浏览器直接访问根路径时，应进入书架首页（`/home`）
+  - 不应默认跳转到 `/beian-love-record.html`
+  - 页面应正常渲染书架内容与底部导航
+
+- 目标页面：`/beian-love-record.html`
 - 场景：检查备案静态展示页直出
 - 关注点：
-  - 浏览器直接访问根路径时，应展示“颜璐 和 廖彬彬”的生活记录页，不应先出现 SPA 壳页面
+  - 浏览器直接访问该静态路径时，应展示“颜璐 和 廖彬彬”的生活记录页
   - 页面应为纯展示内容，无登录、评论、发布、交易等交互入口
   - 页面包含“记录说明”并声明仅用于个人生活展示与备案说明
   - 移动端宽度下排版正常，无横向溢出
@@ -269,3 +276,7 @@ reader-test/test-cases-runs/<run-id>/report.md
   - 指定 `--port` 时上传阶段不应出现 `scp: stat local "22"` 类端口误解析错误
   - 当 `--restart` 失败且传入 `--start` 时，脚本应自动执行启动命令并继续完成部署
   - 传入 `--skip-build` 时应跳过本地构建阶段
+  - 仅传入 `--server-name` + `--nginx-80-proxy` 时，生成的 Nginx 配置不应包含 `/beian-love-record.html` 专用路由与 `error_page 502 503 504` 回退规则
+  - 同时传入 `--server-name pairlab.cn --beian-server-name read.pairlab.cn` 时：
+    - `pairlab.cn` 应反向代理到应用端口
+    - `read.pairlab.cn` 应返回 `/beian-love-record.html` 静态页

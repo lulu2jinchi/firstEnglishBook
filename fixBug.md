@@ -1,5 +1,55 @@
 # Bug 修复记录
 
+## 2026-02-25 域名分流配置（主站与备案页分域名）
+
+### 现象
+
+- 需要将 `pairlab.cn` 指向 First English Book 应用。
+- 同时将 `read.pairlab.cn` 指向 `beian-love-record.html` 静态页。
+- 现有部署脚本仅支持单一 `server_name`，无法在一次部署里生成双域名路由。
+
+### 根因
+
+- `scripts/deploy-aliyun.sh` 的 `--nginx-80-proxy` 仅写入一个 `server` 块，缺少备案域名专用配置入口。
+
+### 解决方案
+
+- `scripts/deploy-aliyun.sh`
+  - 新增参数 `--beian-server-name`。
+  - `--server-name` 负责应用域名（反代 `127.0.0.1:<UPSTREAM_PORT>`）。
+  - `--beian-server-name` 负责备案域名（`/` 与 `/beian-love-record.html` 直出静态页，其它路径重定向回 `/beian-love-record.html`）。
+  - 保留未传 `--beian-server-name` 时的单域名兼容行为。
+
+### 验证
+
+- 执行 `npm run build` 编译通过。
+- 部署后 Nginx 配置包含两个 `server` 块，分别命中 `pairlab.cn` 与 `read.pairlab.cn`。
+
+## 2026-02-25 部署脚本移除备案页重定向与故障回退
+
+### 现象
+
+- `scripts/deploy-aliyun.sh --nginx-80-proxy` 会写入以下特殊规则：
+  - 根路径 `/` 直接返回 `beian-love-record.html`
+  - `502/503/504` 自动回退到备案页
+- 这会让线上入口与应用路由行为不一致，不符合“所有请求由 Nuxt 应用统一处理”的当前部署要求。
+
+### 根因
+
+- 部署脚本中的 Nginx 模板内置了备案页直出和错误页回退逻辑，且带静态文件存在性前置校验。
+
+### 解决方案
+
+- `scripts/deploy-aliyun.sh`
+  - `--nginx-80-proxy` 模式改为单一 `location /` 反向代理到 `127.0.0.1:<UPSTREAM_PORT>`。
+  - 删除 `beian-love-record.html` 相关路由与 `error_page 502 503 504` 回退规则。
+  - 删除备案静态页存在性校验，并更新帮助文案与成功提示语。
+
+### 验证
+
+- 执行 `npm run build` 编译通过。
+- 重新部署后服务器 `/etc/nginx/conf.d/first-english-book.conf` 仅保留全量反向代理规则。
+
 ## 2026-02-21 PM2 停止后备案页无法访问
 
 ### 现象

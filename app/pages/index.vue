@@ -1,16 +1,16 @@
 <template>
   <main class="filing-redirect">
-    <p>正在进入生活记录展示页...</p>
+    <p>正在进入书架首页...</p>
     <p>
       若未自动跳转，请点击
-      <a href="/beian-love-record.html">这里</a>
+      <a href="/home">这里</a>
     </p>
   </main>
 </template>
 
 <script setup lang="ts">
 if (import.meta.client) {
-  window.location.replace('/beian-love-record.html')
+  window.location.replace('/home')
 }
 </script>
 
