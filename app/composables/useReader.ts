@@ -1557,7 +1557,13 @@ export function useReader(
 
       const scrollContainer: HTMLElement | null = win.frameElement?.closest('.epub-container') || null
       const wheelFallbackCooldownMs = 450
+      const touchFallbackCooldownMs = 450
+      const touchFallbackTriggerDeltaPx = 24
       let lastWheelFallbackAt = 0
+      let lastTouchFallbackAt = 0
+      let touchStartX = 0
+      let touchStartY = 0
+      let touchFallbackTriggered = false
 
       const handleWheelFallback = (event: WheelEvent) => {
         if (!scrollContainer) return
@@ -1583,6 +1589,52 @@ export function useReader(
         } else if (event.deltaY < 0) {
           rendition?.prev()
         }
+      }
+
+      const handleTouchStartFallback = (event: TouchEvent) => {
+        if (event.touches.length !== 1) return
+        const touch = event.touches[0]
+        touchStartX = touch.clientX
+        touchStartY = touch.clientY
+        touchFallbackTriggered = false
+      }
+
+      const handleTouchMoveFallback = (event: TouchEvent) => {
+        if (!scrollContainer || event.touches.length !== 1 || touchFallbackTriggered) return
+        const touch = event.touches[0]
+        const deltaY = touch.clientY - touchStartY
+        const deltaX = touch.clientX - touchStartX
+        const absDeltaY = Math.abs(deltaY)
+        if (absDeltaY < touchFallbackTriggerDeltaPx || absDeltaY <= Math.abs(deltaX)) return
+
+        const containerTop = scrollContainer.scrollTop
+        const containerBottom = containerTop + scrollContainer.clientHeight
+        const maxScrollTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight)
+        const atTopEdge = containerTop <= 1
+        const atBottomEdge = containerBottom >= scrollContainer.scrollHeight - 1
+        const containerIsScrollable = maxScrollTop > 1
+        const swipingDownToNext = deltaY < 0
+        const shouldFallback =
+          !containerIsScrollable ||
+          (swipingDownToNext && atBottomEdge) ||
+          (!swipingDownToNext && atTopEdge)
+        if (!shouldFallback) return
+
+        lastScrollInteractionAt = Date.now()
+        const now = Date.now()
+        if (now - lastTouchFallbackAt < touchFallbackCooldownMs) return
+        lastTouchFallbackAt = now
+        touchFallbackTriggered = true
+        event.preventDefault()
+        if (swipingDownToNext) {
+          rendition?.next()
+        } else {
+          rendition?.prev()
+        }
+      }
+
+      const handleTouchEndFallback = () => {
+        touchFallbackTriggered = false
       }
 
       const getViewportData = () => {
@@ -1700,6 +1752,10 @@ export function useReader(
       // 视口尺寸变化同样影响可见性
       scrollContainer?.addEventListener('resize', handleScrollOrResize as any)
       doc.addEventListener('wheel', handleWheelFallback, { passive: false })
+      doc.addEventListener('touchstart', handleTouchStartFallback, { passive: true })
+      doc.addEventListener('touchmove', handleTouchMoveFallback, { passive: false })
+      doc.addEventListener('touchend', handleTouchEndFallback)
+      doc.addEventListener('touchcancel', handleTouchEndFallback)
 
       // 初始发送一次，确保父页面拿到首屏段落
       handleScrollOrResize()
@@ -1711,6 +1767,10 @@ export function useReader(
         scrollContainer?.removeEventListener('resize', handleScrollOrResize as any)
         doc.removeEventListener('dblclick', handleDblClick)
         doc.removeEventListener('wheel', handleWheelFallback)
+        doc.removeEventListener('touchstart', handleTouchStartFallback)
+        doc.removeEventListener('touchmove', handleTouchMoveFallback)
+        doc.removeEventListener('touchend', handleTouchEndFallback)
+        doc.removeEventListener('touchcancel', handleTouchEndFallback)
         if (debounceTimer) {
           clearTimeout(debounceTimer)
           debounceTimer = null

@@ -1,5 +1,35 @@
 # Bug 修复记录
 
+## 2026-02-25 Normal People 首屏封面在手机端无法下滑进入正文
+
+### 现象
+
+- 在手机端打开 `Normal People (Sally Rooney)` 后，首屏停留在封面图。
+- 用户上滑（希望向下阅读）没有任何反应，无法进入正文。
+- 其他普通正文起始的书籍可正常上下滚动。
+
+### 根因
+
+1. 该书首个章节是封面图，常见状态是当前容器不可滚动（`scrollHeight` 接近 `clientHeight`）。
+2. 阅读器此前只实现了桌面端 `wheel fallback`（滚轮兜底翻章），没有移动端触摸手势的同等兜底。
+3. 在“不可滚封面章节”里，触摸滚动不会触发章节推进，导致卡在首屏。
+
+### 解决方案
+
+- `app/composables/useReader.ts`
+  - 在 `attachContentHooks` 中新增 `touch fallback`：
+    - 监听 `touchstart/touchmove/touchend/touchcancel`；
+    - 仅在纵向滑动且达到阈值时判定；
+    - 仅当容器不可滚，或命中上下边界时，触发 `rendition.next()/prev()`；
+    - 增加冷却时间与单次手势触发保护，避免连跳和误触。
+  - 继续保留原有 `wheel fallback`，桌面与移动端分别覆盖。
+
+### 验证
+
+- 手机端打开 `Normal People`，首屏封面上滑可进入后续正文章节。
+- 其他书籍在可滚正文中的普通滑动行为不受影响。
+- 执行 `npm run build`，编译通过。
+
 ## 2026-02-25 域名分流配置（主站与备案页分域名）
 
 ### 现象
