@@ -1,0 +1,86 @@
+name: Deploy To Aliyun
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Setup SSH Agent
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}
+
+      - name: Setup Known Hosts
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf "%s\n" "${DEPLOY_KNOWN_HOSTS}" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+        env:
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+
+      - name: Deploy
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_RESTART_CMD: ${{ vars.DEPLOY_RESTART_CMD }}
+          DEPLOY_START_CMD: ${{ vars.DEPLOY_START_CMD }}
+        run: |
+          set -euo pipefail
+
+          : "${DEPLOY_HOST:?missing variable DEPLOY_HOST}"
+          : "${DEPLOY_PATH:?missing variable DEPLOY_PATH}"
+
+          if [[ -z "${DEPLOY_PORT}" ]]; then
+            DEPLOY_PORT="22"
+          fi
+
+          if [[ -z "${DEPLOY_RESTART_CMD}" ]]; then
+            DEPLOY_RESTART_CMD="systemctl restart server"
+          fi
+
+          DEPLOY_CMD=(
+            npm run deploy:aliyun --
+            --host "${DEPLOY_HOST}"
+            --path "${DEPLOY_PATH}"
+            --port "${DEPLOY_PORT}"
+            --restart "${DEPLOY_RESTART_CMD}"
+            --skip-build
+          )
+
+          if [[ -n "${DEPLOY_START_CMD}" ]]; then
+            DEPLOY_CMD+=(--start "${DEPLOY_START_CMD}")
+          fi
+
+          "${DEPLOY_CMD[@]}"
