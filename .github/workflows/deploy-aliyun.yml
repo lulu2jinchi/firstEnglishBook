@@ -4,6 +4,18 @@ on:
   push:
     branches:
       - master
+    paths:
+      - "app/**"
+      - "server/**"
+      - "public/**"
+      - "scripts/deploy-aliyun.sh"
+      - "vendor/epubjs/**"
+      - "package.json"
+      - "package-lock.json"
+      - "nuxt.config.ts"
+      - "tailwind.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/deploy-aliyun.yml"
   workflow_dispatch:
 
 permissions:
@@ -22,6 +34,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Write .env
+        run: |
+          set -euo pipefail
+          : "${DEPLOY_ENV_FILE:?missing secret DEPLOY_ENV_FILE}"
+          printf "%s" "${DEPLOY_ENV_FILE}" > .env
+          chmod 600 .env
+        env:
+          DEPLOY_ENV_FILE: ${{ secrets.DEPLOY_ENV_FILE }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -29,8 +52,17 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Restore Nuxt Build Cache
+        uses: actions/cache@v4
+        with:
+          path: .nuxt/cache
+          key: nuxt-cache-${{ runner.os }}-${{ github.ref_name }}-${{ hashFiles('package-lock.json', 'nuxt.config.ts', 'tailwind.config.ts') }}
+          restore-keys: |
+            nuxt-cache-${{ runner.os }}-${{ github.ref_name }}-
+            nuxt-cache-${{ runner.os }}-
+
       - name: Install Dependencies
-        run: npm ci
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Build
         run: npm run build
