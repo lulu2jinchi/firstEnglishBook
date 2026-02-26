@@ -1422,26 +1422,35 @@ export function useReader(
     const fontFamily = readerFontFamily.value
     const fontSize = `${readerFontSize.value}px`
     const lineHeight = `${readerLineHeight.value}`
+    const forcedTextColor = '#111111'
     rendition.themes.default({
-      html: { background: theme.background, color: theme.text },
+      html: { background: theme.background, color: forcedTextColor },
       body: {
         background: theme.background,
-        color: theme.text,
+        color: forcedTextColor,
         'font-family': fontFamily,
         'font-size': fontSize,
         'line-height': lineHeight
       }
     })
     rendition.themes.register('reader-overrides', {
+      html: {
+        color: `${forcedTextColor} !important`
+      },
       body: {
+        color: `${forcedTextColor} !important`,
         'font-family': `${fontFamily} !important`,
         'font-size': `${fontSize} !important`,
         'line-height': `${lineHeight} !important`
       },
       'body *': {
+        color: `${forcedTextColor} !important`,
         'font-family': `${fontFamily} !important`,
         'font-size': `${fontSize} !important`,
         'line-height': `${lineHeight} !important`
+      },
+      'a, a:link, a:visited, a:hover, a:active': {
+        color: `${forcedTextColor} !important`
       }
     })
     rendition.themes.select('reader-overrides')
