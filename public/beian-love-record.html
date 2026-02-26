@@ -109,6 +109,25 @@
         text-align: center;
       }
 
+      footer p {
+        margin: 0;
+      }
+
+      footer p + p {
+        margin-top: 8px;
+      }
+
+      .beian-link {
+        color: var(--muted);
+        text-decoration: none;
+        border-bottom: 1px solid var(--line);
+        padding-bottom: 2px;
+      }
+
+      .beian-link:hover {
+        color: var(--accent);
+      }
+
       @media (max-width: 640px) {
         .page {
           width: min(920px, 100% - 20px);
@@ -165,7 +184,18 @@
        
       </section>
 
-      <footer>更新时间：2026-02-21</footer>
+      <footer>
+        <p>更新时间：2026-02-21</p>
+        <p>
+          <a
+            class="beian-link"
+            href="https://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            >苏ICP备2026009774号</a
+          >
+        </p>
+      </footer>
     </div>
   </body>
 </html>
