@@ -430,6 +430,11 @@ const readerFontStorageKey = "first-english-book-reader-font";
 const readerFontSizeStorageKey = "first-english-book-reader-font-size";
 const readerLineHeightStorageKey = "first-english-book-reader-line-height";
 const meaningFontSizeStorageKey = "first-english-book-meaning-font-size";
+const readerPreferencesVersionStorageKey = "first-english-book-reader-preferences-version";
+const readerPreferencesVersion = "2";
+const legacyDefaultReaderFontSize = 16;
+const legacyDefaultReaderLineHeight = 1.6;
+const legacyDefaultMeaningFontSize = 14;
 const minFontSize = MIN_READER_FONT_SIZE;
 const maxFontSize = MAX_READER_FONT_SIZE;
 const minLineHeight = MIN_READER_LINE_HEIGHT;
@@ -455,6 +460,68 @@ const parseStoredNumber = (value: string | null, fallback: number) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const shouldUpgradeLegacyValue = (value: number, legacyDefault: number) => {
+  return Number(Math.abs(value - legacyDefault).toFixed(4)) === 0;
+};
+
+const migrateLegacyReaderPreferences = () => {
+  if (typeof window === "undefined") return;
+  const currentVersion = getStorageValue(readerPreferencesVersionStorageKey);
+  if (currentVersion === readerPreferencesVersion) return;
+
+  const migrateNumberPreference = (
+    key: string,
+    legacyDefault: number,
+    nextDefault: number,
+    min: number,
+    max: number
+  ) => {
+    const raw = getStorageValue(key);
+    if (raw === null || raw.trim() === "") {
+      setStorageValue(key, String(nextDefault));
+      return;
+    }
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) {
+      setStorageValue(key, String(nextDefault));
+      return;
+    }
+    if (shouldUpgradeLegacyValue(parsed, legacyDefault)) {
+      setStorageValue(key, String(nextDefault));
+      return;
+    }
+    const clamped = clampNumber(parsed, min, max);
+    if (clamped !== parsed) {
+      setStorageValue(key, String(clamped));
+    }
+  };
+
+  migrateNumberPreference(
+    readerFontSizeStorageKey,
+    legacyDefaultReaderFontSize,
+    DEFAULT_READER_FONT_SIZE,
+    minFontSize,
+    maxFontSize
+  );
+  migrateNumberPreference(
+    readerLineHeightStorageKey,
+    legacyDefaultReaderLineHeight,
+    DEFAULT_READER_LINE_HEIGHT,
+    minLineHeight,
+    maxLineHeight
+  );
+  migrateNumberPreference(
+    meaningFontSizeStorageKey,
+    legacyDefaultMeaningFontSize,
+    DEFAULT_MEANING_FONT_SIZE,
+    minMeaningFontSize,
+    maxMeaningFontSize
+  );
+  setStorageValue(readerPreferencesVersionStorageKey, readerPreferencesVersion);
+};
+
+migrateLegacyReaderPreferences();
 
 const getThemeById = (id: string) =>
   themeOptions.find((theme) => theme.id === id) || themeOptions[0];
