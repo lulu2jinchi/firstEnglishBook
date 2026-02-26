@@ -15,10 +15,6 @@ usage() {
   --restart   部署后执行的重启命令
               默认: systemctl restart server
   --start     当重启命令失败时执行的启动命令（用于首发部署）
-  --nginx-80-proxy  部署后自动配置 Nginx 监听 80（应用域名反代到应用端口）
-  --server-name     应用域名（Nginx server_name，默认 "_"）
-  --beian-server-name  备案域名（可选；指向 /beian-love-record.html 静态页）
-  --upstream-port   应用端口（默认 3000）
   --port      SSH 端口（默认 22）
   --key       SSH 私钥文件路径（也可通过环境变量 ALIYUN_SSH_KEY 传入）
   --skip-build 跳过本地 npm run build
@@ -30,13 +26,6 @@ usage() {
     --path /opt/firstEnglishBook \
     --restart "pm2 restart server" \
     --start "pm2 start .output/server/index.mjs --name server --update-env"
-
-  npm run deploy:aliyun -- \
-    --host root@1.2.3.4 \
-    --path /opt/firstEnglishBook \
-    --nginx-80-proxy \
-    --server-name pairlab.cn \
-    --beian-server-name read.pairlab.cn
 USAGE
 }
 
@@ -47,10 +36,6 @@ START_CMD=""
 SSH_PORT="22"
 SSH_KEY="${ALIYUN_SSH_KEY:-}"
 SKIP_BUILD="false"
-ENABLE_NGINX_80_PROXY="false"
-NGINX_SERVER_NAME="_"
-NGINX_BEIAN_SERVER_NAME=""
-UPSTREAM_PORT="3000"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -72,22 +57,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --port)
       SSH_PORT="${2:-}"
-      shift 2
-      ;;
-    --nginx-80-proxy)
-      ENABLE_NGINX_80_PROXY="true"
-      shift
-      ;;
-    --server-name)
-      NGINX_SERVER_NAME="${2:-}"
-      shift 2
-      ;;
-    --beian-server-name)
-      NGINX_BEIAN_SERVER_NAME="${2:-}"
-      shift 2
-      ;;
-    --upstream-port)
-      UPSTREAM_PORT="${2:-}"
       shift 2
       ;;
     --key)
@@ -170,90 +139,5 @@ scp "${SCP_OPTS[@]}" "$ARTIFACT_PATH" "$HOST:$REMOTE_PATH/$ARTIFACT_NAME"
 
 echo "[5/5] 服务器解压并重启服务"
 ssh "${SSH_OPTS[@]}" "$HOST" "set -e; cd '$REMOTE_PATH'; rm -rf .output; tar -xzf '$ARTIFACT_NAME'; rm -f '$ARTIFACT_NAME'; if $RESTART_CMD; then echo '远程服务重启成功'; else echo '远程服务重启失败'; if [ -n \"$START_CMD\" ]; then echo '尝试执行启动命令'; $START_CMD; else echo '未提供 --start，部署已完成但服务未启动'; echo '可重试并增加参数：--start \"pm2 start .output/server/index.mjs --name server --update-env\"'; exit 1; fi; fi"
-
-if [[ "$ENABLE_NGINX_80_PROXY" == "true" ]]; then
-  echo "[6/6] 配置服务器 Nginx: 80 -> 127.0.0.1:$UPSTREAM_PORT"
-  ssh "${SSH_OPTS[@]}" "$HOST" "set -e; SERVER_NAME='$NGINX_SERVER_NAME' BEIAN_SERVER_NAME='$NGINX_BEIAN_SERVER_NAME' UPSTREAM_PORT='$UPSTREAM_PORT' STATIC_ROOT='$REMOTE_PATH/.output/public' bash -s" <<'EOF'
-set -euo pipefail
-
-if ! command -v nginx >/dev/null 2>&1; then
-  echo "错误: 服务器未安装 nginx，请先安装后重试（如: apt-get install -y nginx）" >&2
-  exit 1
-fi
-
-CONF_PATH="/etc/nginx/conf.d/first-english-book.conf"
-WRITER="tee"
-APPENDER="tee -a"
-RELOADER="systemctl reload nginx"
-TESTER="nginx -t"
-
-if [[ "$(id -u)" -ne 0 ]]; then
-  if command -v sudo >/dev/null 2>&1; then
-    WRITER="sudo tee"
-    APPENDER="sudo tee -a"
-    RELOADER="sudo systemctl reload nginx"
-    TESTER="sudo nginx -t"
-  else
-    echo "错误: 需要 root 权限或 sudo 权限来写入 $CONF_PATH" >&2
-    exit 1
-  fi
-fi
-
-cat <<CONF | $WRITER "$CONF_PATH" >/dev/null
-server {
-  listen 80;
-  server_name ${SERVER_NAME};
-
-  location / {
-    proxy_pass http://127.0.0.1:${UPSTREAM_PORT};
-    proxy_http_version 1.1;
-    proxy_set_header Host \$host;
-    proxy_set_header X-Real-IP \$remote_addr;
-    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-    proxy_set_header X-Forwarded-Proto \$scheme;
-    proxy_set_header Upgrade \$http_upgrade;
-    proxy_set_header Connection "upgrade";
-  }
-}
-
-CONF
-
-if [[ -n "${BEIAN_SERVER_NAME}" ]]; then
-  if [[ ! -f "${STATIC_ROOT}/beian-love-record.html" ]]; then
-    echo "错误: 未找到备案静态页 ${STATIC_ROOT}/beian-love-record.html" >&2
-    exit 1
-  fi
-
-  cat <<CONF | $APPENDER "$CONF_PATH" >/dev/null
-server {
-  listen 80;
-  server_name ${BEIAN_SERVER_NAME};
-
-  location = / {
-    root ${STATIC_ROOT};
-    try_files /beian-love-record.html =404;
-  }
-
-  location = /beian-love-record.html {
-    root ${STATIC_ROOT};
-    try_files /beian-love-record.html =404;
-  }
-
-  location / {
-    return 302 /beian-love-record.html;
-  }
-}
-CONF
-fi
-
-$TESTER
-$RELOADER
-if [[ -n "${BEIAN_SERVER_NAME}" ]]; then
-  echo "Nginx 已配置: ${SERVER_NAME} -> 127.0.0.1:${UPSTREAM_PORT}; ${BEIAN_SERVER_NAME} -> /beian-love-record.html"
-else
-  echo "Nginx 已配置: ${SERVER_NAME} -> 127.0.0.1:${UPSTREAM_PORT}"
-fi
-EOF
-fi
 
 echo "部署完成: $HOST:$REMOTE_PATH"
