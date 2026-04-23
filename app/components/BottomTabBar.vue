@@ -3,25 +3,27 @@
     <button
       class="tab"
       type="button"
-      aria-label="首页"
+      :aria-current="active === 'home' ? 'page' : undefined"
       :class="{ 'tab--active': active === 'home' }"
       @click="emit('home')"
     >
       <i class="fa-solid fa-house tab-icon" aria-hidden="true"></i>
+      <span class="tab-label">书架</span>
     </button>
-    <button class="tab add-btn" type="button" aria-label="添加" @click="emit('add')">
+    <button class="tab add-btn" type="button" aria-label="导入 EPUB" @click="emit('add')">
       <i class="fa-solid fa-plus tab-icon" aria-hidden="true"></i>
+      <span class="tab-label">导入</span>
     </button>
     <button
       class="tab"
       type="button"
-      aria-label="个人中心"
+      :aria-current="active === 'user' ? 'page' : undefined"
       :class="{ 'tab--active': active === 'user' }"
       @click="emit('user')"
     >
       <i class="fa-solid fa-gear tab-icon" aria-hidden="true"></i>
+      <span class="tab-label">设置</span>
     </button>
-    <div class="home-indicator" aria-hidden="true" />
   </nav>
 </template>
 
@@ -40,68 +42,82 @@ const emit = defineEmits<{
 <style scoped>
 .tab-bar {
   position: fixed;
-  left: 0;
-  right: 0;
+  left: 12px;
+  right: 12px;
   bottom: 0;
-  height: 78px;
-  padding: 10px 24px calc(16px + env(safe-area-inset-bottom, 0px));
+  height: 88px;
+  padding: 10px 12px calc(14px + env(safe-area-inset-bottom, 0px));
   background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 -0.5px 0 rgba(0, 0, 0, 0.1);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-bottom: none;
+  border-radius: 24px 24px 0 0;
+  box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.08);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  align-items: start;
+  align-items: stretch;
   justify-items: center;
   box-sizing: border-box;
-  z-index: 10;
+  z-index: 20;
 }
 
 .tab {
   border: none;
   background: transparent;
-  padding: 12px 20px 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px 4px;
   display: flex;
+  flex-direction: column;
+  gap: 6px;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  color: #64748b;
+  border-radius: 16px;
+  transition: background-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
 }
 
 .tab-icon {
-  font-size: 22px;
-  color: #1d1b20;
+  font-size: 20px;
 }
 
-.tab--active {
-  color: #1d1b20;
+.tab-label {
+  font-size: 12px;
+  line-height: 1;
   font-weight: 600;
 }
 
-.tab--active .tab-icon {
-  color: #0f0d12;
+.tab:focus-visible {
+  outline: 2px solid #111827;
+  outline-offset: -2px;
+}
+
+.tab--active {
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.tab--active .tab-icon,
+.tab--active .tab-label {
+  color: inherit;
 }
 
 .add-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 16px;
-  margin-top: -10px;
-  background: #ffffff;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #ffffff;
+  background: #111827;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.18);
 }
 
-.add-btn .tab-icon {
-  font-size: 26px;
+.add-btn .tab-icon,
+.add-btn .tab-label {
+  color: inherit;
 }
 
-.home-indicator {
-  position: absolute;
-  bottom: calc(6px + env(safe-area-inset-bottom, 0px));
-  left: 50%;
-  transform: translateX(-50%);
-  width: 134px;
-  height: 5px;
-  background: #000000;
-  border-radius: 100px;
+.tab:not(.add-btn):active {
+  transform: translateY(1px);
+}
+
+.add-btn:active {
+  transform: translateY(1px);
 }
 </style>

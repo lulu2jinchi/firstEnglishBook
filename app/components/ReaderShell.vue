@@ -5,34 +5,88 @@
     </div>
 
     <header class="reader-topbar" aria-label="阅读器工具栏">
-      <div class="topbar-actions">
-        <button class="topbar-button" type="button" aria-label="目录" @click="togglePanel('outline')">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <rect x="4" y="5" width="3" height="3" rx="1" />
-            <rect x="4" y="10.5" width="3" height="3" rx="1" />
-            <rect x="4" y="16" width="3" height="3" rx="1" />
-            <rect x="9.5" y="5.5" width="10.5" height="2" rx="1" />
-            <rect x="9.5" y="11" width="10.5" height="2" rx="1" />
-            <rect x="9.5" y="16.5" width="10.5" height="2" rx="1" />
-          </svg>
-        </button>
-        <button class="topbar-button" type="button" aria-label="配色" @click="togglePanel('theme')">
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="M12 3a9 9 0 1 0 9 9h-9V3z"
-              fill="currentColor"
-            />
-            <path
-              d="M12 3v9h9"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-            />
-          </svg>
-        </button>
-        <button class="topbar-button" type="button" aria-label="排版" @click="togglePanel('type')">
-          <span class="topbar-text">Aa</span>
-        </button>
+      <div class="topbar-card">
+        <div class="topbar-actions">
+          <button
+            class="topbar-button mode-button"
+            type="button"
+            :disabled="isLoading"
+            :aria-label="modeButtonText"
+            :title="modeButtonText"
+            @click="toggleMode"
+          >
+            <svg v-if="isPaginated" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M8 5.5a1 1 0 0 1 1 1v8.88l2.3-2.29a1 1 0 1 1 1.4 1.42l-4 3.96a1 1 0 0 1-1.4 0l-4-3.96a1 1 0 1 1 1.4-1.42L7 15.38V6.5a1 1 0 0 1 1-1Z"
+                fill="currentColor"
+              />
+              <path
+                d="M16 18.5a1 1 0 0 1-1-1V8.62l-2.3 2.29a1 1 0 1 1-1.4-1.42l4-3.96a1 1 0 0 1 1.4 0l4 3.96a1 1 0 1 1-1.4 1.42L17 8.62v8.88a1 1 0 0 1-1 1Z"
+                fill="currentColor"
+              />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M5.5 8a1 1 0 0 1 1-1h8.88L13.1 4.7a1 1 0 1 1 1.42-1.4l3.96 4a1 1 0 0 1 0 1.4l-3.96 4a1 1 0 1 1-1.42-1.4L15.38 9H6.5a1 1 0 0 1-1-1Z"
+                fill="currentColor"
+              />
+              <path
+                d="M18.5 16a1 1 0 0 1-1 1H8.62l2.29 2.3a1 1 0 1 1-1.42 1.4l-3.96-4a1 1 0 0 1 0-1.4l3.96-4a1 1 0 1 1 1.42 1.4L8.62 15h8.88a1 1 0 0 1 1 1Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+          <div class="topbar-tools">
+            <button
+              class="topbar-button"
+              :class="{ 'topbar-button--active': activePanel === 'outline' }"
+              type="button"
+              aria-label="目录"
+              :aria-pressed="activePanel === 'outline'"
+              @click="togglePanel('outline')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="4" y="5" width="3" height="3" rx="1" />
+                <rect x="4" y="10.5" width="3" height="3" rx="1" />
+                <rect x="4" y="16" width="3" height="3" rx="1" />
+                <rect x="9.5" y="5.5" width="10.5" height="2" rx="1" />
+                <rect x="9.5" y="11" width="10.5" height="2" rx="1" />
+                <rect x="9.5" y="16.5" width="10.5" height="2" rx="1" />
+              </svg>
+            </button>
+            <button
+              class="topbar-button"
+              :class="{ 'topbar-button--active': activePanel === 'theme' }"
+              type="button"
+              aria-label="配色"
+              :aria-pressed="activePanel === 'theme'"
+              @click="togglePanel('theme')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M12 3a9 9 0 1 0 9 9h-9V3z"
+                  fill="currentColor"
+                />
+                <path
+                  d="M12 3v9h9"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.5"
+                />
+              </svg>
+            </button>
+            <button
+              class="topbar-button"
+              :class="{ 'topbar-button--active': activePanel === 'type' }"
+              type="button"
+              aria-label="排版"
+              :aria-pressed="activePanel === 'type'"
+              @click="togglePanel('type')"
+            >
+              <span class="topbar-text">Aa</span>
+            </button>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -64,7 +118,8 @@
         class="panel-sheet"
         role="dialog"
         aria-modal="true"
-        :aria-label="panelLabel"
+        tabindex="-1"
+        :aria-labelledby="panelTitleId"
         @click.stop
         @touchstart="handlePanelTouchStart"
         @touchmove="handlePanelTouchMove"
@@ -72,8 +127,15 @@
         @touchcancel="handlePanelTouchEnd"
       >
         <div class="panel-handle" />
+        <div class="panel-header">
+          <div>
+            <h3 :id="panelTitleId">{{ panelLabel }}</h3>
+          </div>
+          <button class="panel-close" type="button" aria-label="关闭面板" @click="closePanel">
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
+        </div>
         <div v-if="activePanel === 'outline'" ref="panelContentEl" class="panel-content">
-          <h3>目录</h3>
           <div v-if="flatToc.length === 0" class="panel-empty">暂无目录</div>
           <button
             v-for="item in flatToc"
@@ -88,7 +150,6 @@
         </div>
 
         <div v-else-if="activePanel === 'theme'" ref="panelContentEl" class="panel-content">
-          <h3>阅读配色</h3>
           <div class="theme-grid">
             <button
               v-for="theme in themeOptions"
@@ -96,12 +157,17 @@
               type="button"
               class="theme-card"
               :class="{ active: theme.id === activeThemeId }"
+              :aria-pressed="theme.id === activeThemeId"
               :style="{
                 '--theme-bg': theme.background,
                 '--theme-text': theme.text
               }"
               @click="selectTheme(theme.id)"
             >
+              <span class="theme-swatch" aria-hidden="true">
+                <span class="theme-swatch__bg"></span>
+                <span class="theme-swatch__text"></span>
+              </span>
               <span class="theme-title">Aa</span>
               <span class="theme-label">{{ theme.label }}</span>
             </button>
@@ -109,7 +175,6 @@
         </div>
 
         <div v-else ref="panelContentEl" class="panel-content">
-          <h3>字体与排版</h3>
           <div
             class="type-preview"
             :style="{
@@ -124,7 +189,9 @@
           </div>
 
           <div class="type-section">
-            <div class="type-label">字体</div>
+            <div class="type-heading">
+              <div class="type-label">字体</div>
+            </div>
             <div class="font-list">
               <button
                 v-for="font in fontOptions"
@@ -132,6 +199,7 @@
                 type="button"
                 class="font-option"
                 :class="{ active: font.id === activeFontId }"
+                :aria-pressed="font.id === activeFontId"
                 :style="{ fontFamily: font.family }"
                 @click="selectFont(font.id)"
               >
@@ -142,32 +210,37 @@
           </div>
 
           <div class="type-section">
-            <div class="type-label">字号</div>
+            <div class="type-heading">
+              <div class="type-label">字号</div>
+            </div>
             <div class="stepper">
-              <button type="button" @click="bumpFontSize(-1)">A-</button>
+              <button type="button" aria-label="减小正文字号" @click="bumpFontSize(-1)">A-</button>
               <span class="stepper-value">{{ fontSize }}px</span>
-              <button type="button" @click="bumpFontSize(1)">A+</button>
+              <button type="button" aria-label="增大正文字号" @click="bumpFontSize(1)">A+</button>
             </div>
           </div>
 
           <div class="type-section">
-            <div class="type-label">行高</div>
+            <div class="type-heading">
+              <div class="type-label">行高</div>
+            </div>
             <div class="stepper">
-              <button type="button" @click="bumpLineHeight(-0.1)">-</button>
+              <button type="button" aria-label="减小行高" @click="bumpLineHeight(-0.1)">-</button>
               <span class="stepper-value">{{ lineHeight.toFixed(1) }}x</span>
-              <button type="button" @click="bumpLineHeight(0.1)">+</button>
+              <button type="button" aria-label="增大行高" @click="bumpLineHeight(0.1)">+</button>
             </div>
           </div>
 
           <div class="type-section">
-            <div class="type-label">释义字号</div>
+            <div class="type-heading">
+              <div class="type-label">释义字号</div>
+            </div>
             <div class="stepper">
-              <button type="button" @click="bumpMeaningFontSize(-1)">A-</button>
+              <button type="button" aria-label="减小释义字号" @click="bumpMeaningFontSize(-1)">A-</button>
               <span class="stepper-value">{{ meaningFontSize }}px</span>
-              <button type="button" @click="bumpMeaningFontSize(1)">A+</button>
+              <button type="button" aria-label="增大释义字号" @click="bumpMeaningFontSize(1)">A+</button>
             </div>
           </div>
-
         </div>
       </section>
     </div>
@@ -317,6 +390,9 @@ watch(
 
 onBeforeUnmount(() => {
   clearObjectUrl();
+  if (typeof window !== "undefined") {
+    window.removeEventListener("keydown", handlePanelEscape);
+  }
 });
 
 const {
@@ -606,6 +682,7 @@ const panelLabel = computed(() => {
   if (activePanel.value === "type") return "字体与排版";
   return "";
 });
+const panelTitleId = computed(() => `reader-panel-title-${activePanel.value || "none"}`);
 
 const togglePanel = (panel: "outline" | "theme" | "type") => {
   activePanel.value = activePanel.value === panel ? null : panel;
@@ -614,6 +691,11 @@ const togglePanel = (panel: "outline" | "theme" | "type") => {
 const closePanel = () => {
   activePanel.value = null;
   resetPanelTransform();
+};
+const handlePanelEscape = (event: KeyboardEvent) => {
+  if (event.key === "Escape") {
+    closePanel();
+  }
 };
 
 const selectTheme = (id: string, persist = true) => {
@@ -746,9 +828,17 @@ const handlePanelTouchEnd = () => {
 watch(
   () => activePanel.value,
   (value) => {
+    if (typeof window !== "undefined") {
+      if (value) {
+        window.addEventListener("keydown", handlePanelEscape);
+      } else {
+        window.removeEventListener("keydown", handlePanelEscape);
+      }
+    }
     if (!value) return;
     void nextTick(() => {
       resetPanelTransform();
+      panelSheetEl.value?.focus();
     });
   }
 );
@@ -781,10 +871,10 @@ applyMeaningFontSize(meaningFontSize.value, false);
 
 .api-error-toast {
   position: fixed;
-  top: 16px;
+  top: calc(env(safe-area-inset-top, 0px) + 14px);
   left: 50%;
   transform: translateX(-50%);
-  z-index: 20;
+  z-index: 30;
   max-width: min(90vw, 520px);
   padding: 10px 16px;
   border-radius: 999px;
@@ -795,111 +885,9 @@ applyMeaningFontSize(meaningFontSize.value, false);
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.35);
 }
 
-.reader-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.header-actions {
-  margin-left: auto;
-}
-
-.mode-toggle {
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(148, 163, 184, 0.35);
-  background: rgba(148, 163, 184, 0.16);
-  color: #e2e8f0;
-  font-weight: 700;
-  cursor: pointer;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease,
-    border-color 0.2s ease;
-}
-
-.mode-toggle:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.25);
-  background: rgba(148, 163, 184, 0.24);
-  border-color: rgba(148, 163, 184, 0.6);
-}
-
-.mode-toggle:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.title-block h1 {
-  margin: 4px 0 0;
-  font-size: 20px;
-  font-weight: 700;
-}
-
-.eyebrow {
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.controls {
-  display: flex;
-  gap: 10px;
-}
-
-.controls button {
-  padding: 10px 14px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-weight: 600;
-  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.2s ease,
-    border-color 0.2s ease;
-  color: #0f172a;
-}
-
-.controls button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.controls .primary {
-  background: linear-gradient(135deg, #22d3ee, #6366f1);
-  color: #0b1224;
-  box-shadow: 0 10px 30px rgba(99, 102, 241, 0.35);
-}
-
-.controls .ghost {
-  background: rgba(148, 163, 184, 0.15);
-  border-color: rgba(148, 163, 184, 0.5);
-  color: #e2e8f0;
-}
-
-.controls button:not(:disabled):hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
-}
-
-.status-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  background: rgba(148, 163, 184, 0.08);
-  border: 1px solid rgba(148, 163, 184, 0.25);
-  border-radius: 12px;
-  font-size: 14px;
-  color: #cbd5e1;
-}
-
 .reader-body {
   flex: 1;
-  min-height: 70vh;
+  min-height: 0;
   display: flex;
   position: relative;
   background: var(--reader-bg, #fff8dc);
@@ -926,7 +914,7 @@ applyMeaningFontSize(meaningFontSize.value, false);
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(6px);
-  z-index: 2; /* 确保翻页按钮层级高于阅读区域 */
+  z-index: 10;
 }
 
 .page-button:hover:not(:disabled) {
@@ -966,30 +954,44 @@ applyMeaningFontSize(meaningFontSize.value, false);
 
 .reader-topbar {
   position: fixed;
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
-  right: 16px;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: 12px;
   left: auto;
-  display: flex;
-  justify-content: flex-end;
-  z-index: 6;
+  z-index: 20;
   pointer-events: none;
+}
+
+.topbar-card {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  pointer-events: auto;
+  padding: 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-panel, #ffffff) 82%, transparent);
+  border: 1px solid color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.1);
+}
+
+.panel-header h3 {
+  margin: 0;
 }
 
 .topbar-actions {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  pointer-events: auto;
-  padding: 6px;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--reader-panel, #ffffff) 85%, transparent);
-  border: 1px solid color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
-  backdrop-filter: blur(10px) saturate(140%);
+}
+
+.topbar-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .topbar-button {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: 1px solid transparent;
   background: transparent;
@@ -998,8 +1000,7 @@ applyMeaningFontSize(meaningFontSize.value, false);
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease,
-    transform 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 .topbar-button svg {
@@ -1008,23 +1009,42 @@ applyMeaningFontSize(meaningFontSize.value, false);
   fill: currentColor;
 }
 
-.topbar-button:hover {
+.topbar-button:hover,
+.topbar-button--active {
   background: color-mix(in srgb, var(--reader-bg, #fff8dc) 60%, transparent);
   border-color: color-mix(in srgb, var(--reader-border, #e5e7eb) 70%, transparent);
+}
+
+.mode-button {
+  background: color-mix(in srgb, var(--reader-bg, #fff8dc) 72%, transparent);
+  border-color: color-mix(in srgb, var(--reader-border, #e5e7eb) 55%, transparent);
+}
+
+.mode-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.topbar-button:focus-visible,
+.panel-close:focus-visible,
+.toc-item:focus-visible,
+.theme-card:focus-visible,
+.font-option:focus-visible,
+.stepper button:focus-visible {
+  outline: 2px solid var(--reader-text, #0f172a);
+  outline-offset: 2px;
 }
 
 .topbar-text {
   font-weight: 700;
   font-size: 14px;
-  letter-spacing: 0.02em;
 }
 
 .panel-overlay {
   position: fixed;
   inset: 0;
   background: rgba(15, 23, 42, 0.35);
-  backdrop-filter: blur(4px);
-  z-index: 7;
+  z-index: 20;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -1041,6 +1061,33 @@ applyMeaningFontSize(meaningFontSize.value, false);
   box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.18);
   overflow: hidden;
   overscroll-behavior: contain;
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.panel-header h3 {
+  font-size: 22px;
+  line-height: 1.1;
+  color: inherit;
+}
+
+.panel-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--reader-border, #e5e7eb);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
 }
 
 .panel-handle {
@@ -1077,22 +1124,17 @@ applyMeaningFontSize(meaningFontSize.value, false);
     height: 100%;
     border-radius: 18px 0 0 18px;
     padding: 18px 20px 20px;
-    box-shadow: -10px 0 30px rgba(15, 23, 42, 0.18);
+  box-shadow: -10px 0 30px rgba(15, 23, 42, 0.18);
   }
 
   .panel-content {
-    max-height: calc(100dvh - 48px);
+    max-height: calc(100dvh - 110px);
     padding-bottom: 8px;
   }
 
   .panel-handle {
     display: none;
   }
-}
-
-.panel-content h3 {
-  margin: 0;
-  font-size: 16px;
 }
 
 .panel-empty {
@@ -1142,11 +1184,42 @@ applyMeaningFontSize(meaningFontSize.value, false);
   align-items: flex-start;
   gap: 6px;
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.theme-swatch {
+  width: 100%;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--theme-text) 18%, transparent);
+  background: color-mix(in srgb, var(--theme-bg) 92%, white 8%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  box-sizing: border-box;
+}
+
+.theme-swatch__bg,
+.theme-swatch__text {
+  display: block;
+  border-radius: 999px;
+  background: var(--theme-text);
+}
+
+.theme-swatch__bg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.3;
+}
+
+.theme-swatch__text {
+  width: 54px;
+  height: 4px;
+  opacity: 0.8;
 }
 
 .theme-card.active {
-  outline: 2px solid #3498ff;
+  outline: 2px solid color-mix(in srgb, var(--theme-text) 70%, white 30%);
   outline-offset: -1px;
 }
 
@@ -1173,9 +1246,17 @@ applyMeaningFontSize(meaningFontSize.value, false);
   gap: 10px;
 }
 
+.type-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
 .type-label {
-  font-size: 13px;
-  color: var(--reader-muted, #6b7280);
+  font-size: 14px;
+  font-weight: 600;
+  color: inherit;
 }
 
 .font-list {
@@ -1218,7 +1299,10 @@ applyMeaningFontSize(meaningFontSize.value, false);
 }
 
 .stepper button {
-  border: none;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid var(--reader-border, #e5e7eb);
+  border-radius: 10px;
   background: transparent;
   font-weight: 700;
   font-size: 15px;
@@ -1232,17 +1316,18 @@ applyMeaningFontSize(meaningFontSize.value, false);
 }
 
 @media (max-width: 720px) {
-  .reader-shell {
+  .reader-topbar {
+    right: 10px;
   }
 
-  .reader-header {
+  .page-button {
+    width: 38px;
+    height: 56px;
+  }
+
+  .type-heading {
     flex-direction: column;
     align-items: flex-start;
-  }
-
-  .controls {
-    width: 100%;
-    justify-content: flex-start;
   }
 }
 </style>

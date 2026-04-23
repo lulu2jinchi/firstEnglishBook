@@ -1,20 +1,32 @@
 <template>
   <div class="home-page">
-    <div class="toolbar">
-      <label class="search-bar" aria-label="搜索书籍">
-        <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
-        <input v-model="searchQuery" type="search" placeholder="Search" />
-      </label>
-      <button class="edit-toggle" type="button" @click="handleEditToggle">
-        {{ editMode ? '完成' : '编辑' }}
-      </button>
-    </div>
+    <header class="hero-panel">
+      <div class="toolbar">
+        <label class="search-bar" aria-label="搜索书籍">
+          <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+          <input v-model="searchQuery" type="search" placeholder="搜索书名" />
+        </label>
+        <button
+          class="edit-toggle"
+          type="button"
+          :aria-pressed="editMode"
+          @click="handleEditToggle"
+        >
+          {{ editMode ? '完成' : '整理' }}
+        </button>
+      </div>
+      <p v-if="uploadFeedback" class="upload-feedback" role="status" aria-live="polite">
+        {{ uploadFeedback }}
+      </p>
+    </header>
 
-    <div v-if="editMode" class="edit-panel">
-      <p class="edit-count">已选 {{ selectedCount }} 本</p>
+    <section v-if="editMode" class="edit-panel" aria-label="书架整理工具">
+      <div>
+        <p class="edit-count">已选 {{ selectedCount }} 本</p>
+      </div>
       <div class="edit-actions">
         <button class="edit-action-btn" type="button" @click="toggleSelectAll">
-          {{ isAllSelected ? '取消全选' : '全选' }}
+          {{ isAllSelected ? '取消全选' : '全选可见书籍' }}
         </button>
         <button
           class="edit-action-btn edit-action-btn--danger"
@@ -25,7 +37,7 @@
           移出书架
         </button>
       </div>
-    </div>
+    </section>
 
     <input
       ref="fileInput"
@@ -35,47 +47,69 @@
       @change="handleUpload"
     />
 
-    <div class="grid">
-      <div
-        v-for="book in filteredBooks"
-        :key="book.file"
-        class="card"
-        :class="{
-          'card--uploading': book.isUploading,
-          'card--editing': editMode && !book.isUploading,
-          'card--selected': editMode && isBookSelected(book)
-        }"
-        :role="book.isUploading ? 'presentation' : editMode ? 'checkbox' : 'button'"
-        :aria-checked="book.isUploading || !editMode ? undefined : String(isBookSelected(book))"
-        :aria-disabled="book.isUploading ? 'true' : 'false'"
-        :tabindex="book.isUploading ? -1 : 0"
-        @pointerdown="handleBookPointerDown(book, $event)"
-        @pointermove="handleBookPointerMove($event)"
-        @pointerup="clearBookLongPress"
-        @pointerleave="clearBookLongPress"
-        @pointercancel="clearBookLongPress"
-        @click="handleBookClick(book)"
-      >
-        <div class="cover">
-          <div
-            v-if="editMode && !book.isUploading"
-            class="selection-badge"
-            :class="{ 'selection-badge--active': isBookSelected(book) }"
-            aria-hidden="true"
-          >
-            <i class="fa-solid fa-check" aria-hidden="true"></i>
-          </div>
-          <div v-if="book.isUploading" class="cover-upload" aria-hidden="true">
-            <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
-            <span>上传中</span>
-          </div>
-          <img v-else-if="book.cover" :src="book.cover" :alt="book.title" loading="lazy" />
-          <div v-else class="cover-placeholder" aria-hidden="true">{{ book.title }}</div>
+    <section class="books-panel" aria-label="书籍列表">
+      <div v-if="filteredBooks.length === 0" class="empty-state">
+        <div class="empty-icon" aria-hidden="true">
+          <i class="fa-solid fa-book-open-reader"></i>
         </div>
-        <p class="title line-clamp-2">{{ book.title }}</p>
-        <p v-if="book.isUploading" class="upload-percent">{{ uploadLabel }}</p>
+        <h3>{{ searchQuery.trim() ? '没有匹配的书' : '书架还是空的' }}</h3>
+        <p>
+          {{ searchQuery.trim() ? '换个关键词试试，或者导入一本新的 EPUB。' : '导入一本 EPUB，或者从内置书开始阅读。' }}
+        </p>
+        <button class="empty-action" type="button" @click="triggerUpload">导入 EPUB</button>
       </div>
-    </div>
+
+      <div v-else class="grid">
+        <template v-for="book in filteredBooks" :key="book.file">
+          <div v-if="book.isUploading" class="card card--uploading" role="status" aria-live="polite">
+            <div class="cover">
+              <div class="cover-upload" aria-hidden="true">
+                <i class="fa-solid fa-cloud-arrow-up" aria-hidden="true"></i>
+                <span>{{ uploadStatus === 'error' ? '读取失败' : '导入中' }}</span>
+              </div>
+            </div>
+            <div class="card-copy">
+              <p class="title">{{ book.title }}</p>
+              <p class="upload-percent">{{ uploadLabel }}</p>
+            </div>
+          </div>
+
+          <button
+            v-else
+            type="button"
+            class="card"
+            :class="{
+              'card--editing': editMode,
+              'card--selected': editMode && isBookSelected(book)
+            }"
+            :aria-pressed="editMode ? isBookSelected(book) : undefined"
+            :aria-label="getBookActionLabel(book)"
+            @pointerdown="handleBookPointerDown(book, $event)"
+            @pointermove="handleBookPointerMove($event)"
+            @pointerup="clearBookLongPress"
+            @pointerleave="clearBookLongPress"
+            @pointercancel="clearBookLongPress"
+            @click="handleBookClick(book)"
+          >
+            <div class="cover">
+              <div
+                v-if="editMode"
+                class="selection-badge"
+                :class="{ 'selection-badge--active': isBookSelected(book) }"
+                aria-hidden="true"
+              >
+                <i class="fa-solid fa-check" aria-hidden="true"></i>
+              </div>
+              <img v-if="book.cover" :src="book.cover" :alt="book.title" loading="lazy" />
+              <div v-else class="cover-placeholder" aria-hidden="true">{{ book.title }}</div>
+            </div>
+            <div class="card-copy">
+              <p class="title">{{ book.title }}</p>
+            </div>
+          </button>
+        </template>
+      </div>
+    </section>
 
     <BottomTabBar active="home" @home="goHome" @add="triggerUpload" @user="goUser" />
   </div>
@@ -193,6 +227,10 @@ const selectedCount = computed(() => selectedBookKeys.value.size)
 const isAllSelected = computed(
   () => selectableBooks.value.length > 0 && selectedCount.value === selectableBooks.value.length
 )
+const libraryCount = computed(() => books.value.length)
+const uploadedBookCount = computed(
+  () => books.value.filter((book) => book.source === 'upload' && !book.isUploading).length
+)
 
 const filteredBooks = computed(() => {
   const list = books.value
@@ -203,7 +241,6 @@ const filteredBooks = computed(() => {
   const filtered = list.filter(book => book.title.toLowerCase().includes(query))
   return uploadCard.value ? [uploadCard.value, ...filtered] : filtered
 })
-
 const goRead = (book: BookItem) => {
   if (book.source === 'upload' && typeof book.id === 'number') {
     router.push({ path: '/reader', query: { uploadId: String(book.id) } })
@@ -303,6 +340,13 @@ const handleBookClick = (book: BookItem) => {
     return
   }
   goRead(book)
+}
+
+const getBookActionLabel = (book: BookItem) => {
+  if (editMode.value) {
+    return `${isBookSelected(book) ? '取消选择' : '选择'}《${book.title}》`
+  }
+  return `打开《${book.title}》`
 }
 
 const goUser = () => {
@@ -489,6 +533,18 @@ const uploadLabel = computed(() => {
   if (uploadStatus.value === 'error') return '读取失败'
   return `${uploadProgress.value}%`
 })
+const uploadFeedback = computed(() => {
+  if (uploadStatus.value === 'error') {
+    return '导入失败：只支持 EPUB 文件，请重新选择。'
+  }
+  if (uploadStatus.value === 'reading') {
+    return `正在导入《${uploadingBookTitle.value || '书籍'}》`
+  }
+  if (uploadStatus.value === 'success') {
+    return '导入完成，已加入书架。'
+  }
+  return ''
+})
 const uploadCard = computed<BookItem | null>(() => {
   if (!showUploadCard.value) return null
   return {
@@ -576,7 +632,7 @@ const handleUpload = (event: Event) => {
 }
 
 useHead({
-  title: 'Home · First English Book',
+  title: '书架 · First English Book',
   bodyAttrs: {
     class: 'body--home'
   }
@@ -586,8 +642,8 @@ useHead({
 <style scoped>
 :global(body.body--home) {
   margin: 0;
-  background: #ffffff;
-  color: #1d1b20;
+  background: #f3f4f6;
+  color: #111827;
   font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
 }
@@ -595,39 +651,44 @@ useHead({
 .home-page {
   min-height: 100dvh;
   box-sizing: border-box;
-  background: #ffffff;
-  padding: 12px 16px calc(120px + env(safe-area-inset-bottom, 0px));
-  max-width: 480px;
+  background: #f3f4f6;
+  padding: 18px 16px calc(132px + env(safe-area-inset-bottom, 0px));
+  max-width: 560px;
   margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hero-panel,
+.books-panel,
+.edit-panel {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.06);
+}
+
+.hero-panel {
+  padding: 18px;
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.status-bar {
-  height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 4px;
-}
-
-.status-time {
-  height: 21px;
-  width: 54px;
-  object-fit: contain;
-}
-
-.status-icons {
-  width: 67px;
-  height: 12px;
-  object-fit: contain;
+.meta-label,
+.upload-percent {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 600;
+  color: #64748b;
 }
 
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .search-bar {
@@ -635,16 +696,18 @@ useHead({
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 44px;
-  background: #f5f5f5;
-  border-radius: 8px;
-  padding: 8px 12px;
+  min-width: 0;
+  height: 48px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 8px 14px;
   box-sizing: border-box;
 }
 
 .search-icon {
-  font-size: 20px;
-  color: #6f6f6f;
+  font-size: 16px;
+  color: #64748b;
 }
 
 .search-bar input {
@@ -653,38 +716,89 @@ useHead({
   outline: none;
   width: 100%;
   height: 100%;
-  font-size: 16px;
-  line-height: 24px;
-  color: #1d1b20;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #0f172a;
 }
 
 .search-bar input::placeholder {
-  color: #828282;
+  color: #94a3b8;
+}
+
+.edit-toggle,
+.edit-action-btn,
+.empty-action {
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
 }
 
 .edit-toggle {
-  height: 44px;
-  border: none;
-  border-radius: 8px;
+  flex: 0 0 auto;
+  min-width: 64px;
+  min-height: 48px;
+  border-radius: 14px;
   padding: 0 14px;
-  background: #1d1b20;
+  background: #0f172a;
   color: #ffffff;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
-  cursor: pointer;
+  white-space: nowrap;
 }
 
-.edit-panel {
+.hero-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 2px;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.meta-pill {
+  min-width: 88px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.meta-pill strong {
+  font-size: 18px;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.upload-feedback,
+.empty-state p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #64748b;
+}
+
+.upload-feedback {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.edit-panel {
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .edit-count {
-  margin: 0;
-  font-size: 13px;
-  color: #4c4c4c;
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
 }
 
 .edit-actions {
@@ -694,13 +808,12 @@ useHead({
 }
 
 .edit-action-btn {
-  border: 1px solid #d8d8d8;
+  border: 1px solid #cbd5e1;
   background: #ffffff;
-  color: #222222;
+  color: #0f172a;
   border-radius: 999px;
-  padding: 6px 12px;
+  padding: 8px 12px;
   font-size: 13px;
-  cursor: pointer;
 }
 
 .edit-action-btn:disabled {
@@ -709,9 +822,9 @@ useHead({
 }
 
 .edit-action-btn--danger {
-  border-color: #ffbeb8;
-  background: #fff0ee;
-  color: #c23d2f;
+  border-color: #fecaca;
+  background: #fff1f2;
+  color: #be123c;
 }
 
 .sr-only {
@@ -725,17 +838,29 @@ useHead({
   border: 0;
 }
 
+.books-panel {
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px 16px;
+  gap: 18px 14px;
 }
 
 .card {
+  width: 100%;
+  border: none;
+  background: transparent;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   cursor: pointer;
+  padding: 0;
+  text-align: left;
 }
 
 .card--uploading {
@@ -743,35 +868,43 @@ useHead({
 }
 
 .card--editing .cover {
-  box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.1);
+  box-shadow: inset 0 0 0 2px rgba(148, 163, 184, 0.26);
 }
 
 .card--selected .cover {
-  box-shadow: inset 0 0 0 2px #2f8bff;
+  box-shadow: inset 0 0 0 2px #2563eb;
+}
+
+.card:focus-visible {
+  outline: 2px solid #111827;
+  outline-offset: 4px;
+  border-radius: 16px;
 }
 
 .cover {
   position: relative;
   width: 100%;
   aspect-ratio: 157 / 206;
-  border-radius: 8px;
+  border-radius: 16px;
   overflow: hidden;
-  background: #f2efe9;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #f8fafc;
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.06);
 }
 
 .selection-badge {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 10px;
+  left: 10px;
   z-index: 2;
-  width: 26px;
-  height: 26px;
-  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.85);
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(15, 23, 42, 0.36);
   color: #ffffff;
   pointer-events: none;
 }
@@ -782,8 +915,8 @@ useHead({
 }
 
 .selection-badge--active {
-  border-color: #2f8bff;
-  background: #2f8bff;
+  border-color: #2563eb;
+  background: #2563eb;
 }
 
 .selection-badge--active i {
@@ -798,10 +931,10 @@ useHead({
   align-items: center;
   justify-content: center;
   gap: 10px;
-  color: #a56a25;
+  color: #9a3412;
   font-size: 14px;
   font-weight: 600;
-  background: linear-gradient(145deg, #f2efe9, #e7e1d6);
+  background: linear-gradient(145deg, #f8fafc, #e2e8f0);
 }
 
 .cover-upload i {
@@ -824,23 +957,30 @@ useHead({
   justify-content: center;
   padding: 16px;
   text-align: center;
-  color: #4b463c;
+  color: #334155;
   font-size: 14px;
   line-height: 1.4;
   font-weight: 600;
-  background: linear-gradient(145deg, #f2efe9, #e7e1d6);
+  background: linear-gradient(145deg, #f8fafc, #e2e8f0);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .title {
   margin: 0;
-  font-size: 14px;
-  line-height: 1.4;
-  color: #000000;
+  font-size: 15px;
+  line-height: 1.45;
+  color: #0f172a;
+  font-weight: 600;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -848,17 +988,63 @@ useHead({
   text-overflow: ellipsis;
 }
 
-.upload-percent {
-  margin: 0;
-  font-size: 12px;
-  color: #a56a25;
-  font-weight: 600;
+.empty-state {
+  padding: 24px 18px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px dashed #cbd5e1;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
 }
 
+.empty-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: #e2e8f0;
+  color: #334155;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+}
+
+.empty-state h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.empty-action {
+  margin-top: 4px;
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #111827;
+  color: #ffffff;
+}
+
+@media (max-width: 520px) {
+  .edit-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .toolbar {
+    gap: 8px;
+  }
+}
 
 @media (min-width: 768px) {
   .home-page {
-    max-width: 520px;
+    max-width: 640px;
+  }
+
+  .grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 </style>
