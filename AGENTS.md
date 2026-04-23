@@ -27,6 +27,7 @@
 - `app/pages/epub-native-test.vue`：纯 epub.js 基线验证页。
 - `app/components/ReaderShell.vue`：阅读器主 UI 与交互容器。
 - `app/components/BottomTabBar.vue`：底部导航。
+- `app/plugins/vconsole.client.ts`：移动端调试面板初始化插件（开发环境自动启用，生产环境支持查询参数显式开启）。
 - `app/composables/useReader.ts`：阅读器核心逻辑（加载、进度、释义请求、批处理等）。
 - `app/constants/storageKeys.ts`：本地存储 key 常量。
 - `app/constants/readerPreferences.ts`：阅读器偏好配置常量。
