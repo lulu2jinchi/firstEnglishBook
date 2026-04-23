@@ -49,6 +49,7 @@ const INPUT_TYPE = {
  */
 class Book {
 	constructor(url, options) {
+		this.destroyed = false;
 		// Allow passing just options to the Book
 		if (typeof(options) === "undefined" &&
 			  typeof(url) !== "string" &&
@@ -231,6 +232,10 @@ class Book {
 
 		if(url) {
 			this.open(url, this.settings.openAs).catch((error) => {
+				if (this.destroyed) {
+					return;
+				}
+
 				var err = new Error("Cannot load book at "+ url );
 				this.emit(EVENTS.BOOK.OPEN_FAILED, err);
 			});
@@ -245,6 +250,10 @@ class Book {
 	 * @example book.open("/path/to/book.epub")
 	 */
 	open(input, what) {
+		if (this.destroyed) {
+			return Promise.resolve();
+		}
+
 		var opening;
 		var type = what || this.determineType(input);
 
@@ -270,7 +279,13 @@ class Book {
 		} else {
 			this.url = new Url(input);
 			opening = this.openContainer(CONTAINER_PATH)
-				.then(this.openPackaging.bind(this));
+				.then((packagePath) => {
+					if (this.destroyed || !packagePath) {
+						return;
+					}
+
+					return this.openPackaging(packagePath);
+				});
 		}
 
 		return opening;
@@ -284,11 +299,23 @@ class Book {
 	 * @return {Promise}
 	 */
 	openEpub(data, encoding) {
+		if (this.destroyed) {
+			return Promise.resolve();
+		}
+
 		return this.unarchive(data, encoding || this.settings.encoding)
 			.then(() => {
+				if (this.destroyed) {
+					return;
+				}
+
 				return this.openContainer(CONTAINER_PATH);
 			})
 			.then((packagePath) => {
+				if (this.destroyed || !packagePath) {
+					return;
+				}
+
 				return this.openPackaging(packagePath);
 			});
 	}
@@ -300,8 +327,16 @@ class Book {
 	 * @return {string} packagePath
 	 */
 	openContainer(url) {
+		if (this.destroyed) {
+			return Promise.resolve();
+		}
+
 		return this.load(url)
 			.then((xml) => {
+				if (this.destroyed || !xml) {
+					return;
+				}
+
 				this.container = new Container(xml);
 				return this.resolve(this.container.packagePath);
 			});
@@ -314,9 +349,17 @@ class Book {
 	 * @return {Promise}
 	 */
 	openPackaging(url) {
+		if (this.destroyed || !url) {
+			return Promise.resolve();
+		}
+
 		this.path = new Path(url);
 		return this.load(url)
 			.then((xml) => {
+				if (this.destroyed || !xml) {
+					return;
+				}
+
 				this.packaging = new Packaging(xml);
 				return this.unpack(this.packaging);
 			});
@@ -329,9 +372,17 @@ class Book {
 	 * @return {Promise}
 	 */
 	openManifest(url) {
+		if (this.destroyed || !url) {
+			return Promise.resolve();
+		}
+
 		this.path = new Path(url);
 		return this.load(url)
 			.then((json) => {
+				if (this.destroyed || !json) {
+					return;
+				}
+
 				this.packaging = new Packaging();
 				this.packaging.load(json);
 				return this.unpack(this.packaging);
@@ -344,8 +395,12 @@ class Book {
 	 * @return {Promise}     returns a promise with the requested resource
 	 */
 	load(path) {
+		if (this.destroyed) {
+			return Promise.resolve();
+		}
+
 		var resolved = this.resolve(path);
-		if(this.archived) {
+		if(this.archived && this.archive) {
 			return this.archive.request(resolved);
 		} else {
 			return this.request(resolved, null, this.settings.requestCredentials, this.settings.requestHeaders);
@@ -453,14 +508,26 @@ class Book {
 	 * @param {Packaging} packaging object
 	 */
 	unpack(packaging) {
+		if (this.destroyed || !this.loading || !packaging || !this.packaging) {
+			return;
+		}
+
 		this.package = packaging; //TODO: deprecated this
 
 		if (this.packaging.metadata.layout === "") {
 			// rendition:layout not set - check display options if book is pre-paginated
 			this.load(this.url.resolve(IBOOKS_DISPLAY_OPTIONS_PATH)).then((xml) => {
+				if (this.destroyed || !this.loading) {
+					return;
+				}
+
 				this.displayOptions = new DisplayOptions(xml);
 				this.loading.displayOptions.resolve(this.displayOptions);
 			}).catch((err) => {
+				if (this.destroyed || !this.loading) {
+					return;
+				}
+
 				this.displayOptions = new DisplayOptions();
 				this.loading.displayOptions.resolve(this.displayOptions);
 			});
@@ -478,15 +545,33 @@ class Book {
 			replacements: this.settings.replacements || (this.archived ? "blobUrl" : "base64")
 		});
 
-		this.loadNavigation(this.packaging).then(() => {
-			// this.toc = this.navigation.toc;
-			this.loading.navigation.resolve(this.navigation);
-		});
+		this.loadNavigation(this.packaging)
+			.then(() => {
+				if (this.destroyed || !this.loading) {
+					return;
+				}
+
+				// this.toc = this.navigation.toc;
+				this.loading.navigation.resolve(this.navigation);
+			})
+			.catch(() => {
+				if (this.destroyed || !this.loading) {
+					return;
+				}
+
+				this.navigation = this.navigation || new Navigation();
+				this.pageList = this.pageList || new PageList();
+				this.loading.navigation.resolve(this.navigation);
+			});
 
 		if (this.packaging.coverPath) {
 			this.cover = this.resolve(this.packaging.coverPath);
 		}
 		// Resolve promises
+		if (!this.loading) {
+			return;
+		}
+
 		this.loading.manifest.resolve(this.packaging.manifest);
 		this.loading.metadata.resolve(this.packaging.metadata);
 		this.loading.spine.resolve(this.spine);
@@ -495,21 +580,33 @@ class Book {
 		this.loading.pageList.resolve(this.pageList);
 
 		this.isOpen = true;
+		const loadedDisplayOptions = this.loaded && this.loaded.displayOptions;
+		const finalizeOpen = () => {
+			if (!loadedDisplayOptions) {
+				return Promise.resolve();
+			}
+
+			return loadedDisplayOptions.then(() => {
+				if (this.destroyed || !this.opening) {
+					return;
+				}
+
+				this.opening.resolve(this);
+			});
+		};
 
 		if(this.archived || this.settings.replacements && this.settings.replacements != "none") {
 			this.replacements().then(() => {
-				this.loaded.displayOptions.then(() => {
-					this.opening.resolve(this);
-				});
+				return finalizeOpen();
 			})
 			.catch((err) => {
-				console.error(err);
+				if (!this.destroyed) {
+					console.error(err);
+				}
 			});
 		} else {
 			// Resolve book opened promise
-			this.loaded.displayOptions.then(() => {
-				this.opening.resolve(this);
-			});
+			finalizeOpen();
 		}
 
 	}
@@ -520,6 +617,10 @@ class Book {
 	 * @param {Packaging} packaging
 	 */
 	loadNavigation(packaging) {
+		if (this.destroyed || !packaging) {
+			return Promise.resolve(new Navigation());
+		}
+
 		let navPath = packaging.navPath || packaging.ncxPath;
 		let toc = packaging.toc;
 
@@ -547,6 +648,12 @@ class Book {
 
 		return this.load(navPath, "xml")
 			.then((xml) => {
+				if (this.destroyed || !xml) {
+					this.navigation = new Navigation();
+					this.pageList = new PageList();
+					return this.navigation;
+				}
+
 				this.navigation = new Navigation(xml);
 				this.pageList = new PageList(xml);
 				return this.navigation;
@@ -612,6 +719,10 @@ class Book {
 	 * @return {Store}
 	 */
 	store(name) {
+		if (this.destroyed) {
+			return;
+		}
+
 		// Use "blobUrl" or "base64" for replacements
 		let replacementsSetting = this.settings.replacements && this.settings.replacements !== "none";
 		// Save original url
@@ -624,23 +735,44 @@ class Book {
 		this.request = this.storage.request.bind(this.storage);
 
 		this.opened.then(() => {
-			if (this.archived) {
+			if (this.destroyed || !this.storage) {
+				return;
+			}
+
+			if (this.archived && this.archive) {
 				this.storage.requester = this.archive.request.bind(this.archive);
 			}
+			let currentResources = this.resources;
 			// Substitute hook
 			let substituteResources = (output, section) => {
-				section.output = this.resources.substitute(output, section.url);
+				if (!currentResources || currentResources.destroyed) {
+					return;
+				}
+
+				section.output = currentResources.substitute(output, section.url);
 			};
 
 			// Set to use replacements
-			this.resources.settings.replacements = replacementsSetting || "blobUrl";
+			if (!currentResources || currentResources.destroyed || !currentResources.settings) {
+				return;
+			}
+
+			currentResources.settings.replacements = replacementsSetting || "blobUrl";
 			// Create replacement urls
-			this.resources.replacements().
+			currentResources.replacements().
 				then(() => {
-					return this.resources.replaceCss();
+					if (this.destroyed || this.resources !== currentResources) {
+						return [];
+					}
+
+					return currentResources.replaceCss();
 				});
 
 			this.storage.on("offline", () => {
+				if (this.destroyed || !this.spine || !this.url) {
+					return;
+				}
+
 				// Remove url to use relative resolving for hrefs
 				this.url = new Url("/", "");
 				// Add hook to replace resources in contents
@@ -648,6 +780,10 @@ class Book {
 			});
 
 			this.storage.on("online", () => {
+				if (this.destroyed || !this.spine) {
+					return;
+				}
+
 				// Restore original url
 				this.url = originalUrl;
 				// Remove hook
@@ -664,12 +800,16 @@ class Book {
 	 * @return {Promise<?string>} coverUrl
 	 */
 	coverUrl() {
+		if (this.destroyed || !this.loaded || !this.loaded.cover) {
+			return Promise.resolve(null);
+		}
+
 		return this.loaded.cover.then(() => {
-			if (!this.cover) {
+			if (this.destroyed || !this.cover) {
 				return null;
 			}
 
-			if (this.archived) {
+			if (this.archived && this.archive) {
 				return this.archive.createUrl(this.cover);
 			} else {
 				return this.cover;
@@ -683,13 +823,26 @@ class Book {
 	 * @return {Promise} completed loading urls
 	 */
 	replacements() {
+		if (this.destroyed || !this.resources || !this.spine || !this.spine.hooks || !this.spine.hooks.serialize) {
+			return Promise.resolve([]);
+		}
+
+		let currentResources = this.resources;
 		this.spine.hooks.serialize.register((output, section) => {
-			section.output = this.resources.substitute(output, section.url);
+			if (!currentResources || currentResources.destroyed) {
+				return;
+			}
+
+			section.output = currentResources.substitute(output, section.url);
 		});
 
-		return this.resources.replacements().
+		return currentResources.replacements().
 			then(() => {
-				return this.resources.replaceCss();
+				if (this.destroyed || this.resources !== currentResources) {
+					return [];
+				}
+
+				return currentResources.replaceCss();
 			});
 	}
 
@@ -727,6 +880,7 @@ class Book {
 	 * Destroy the Book and all associated objects
 	 */
 	destroy() {
+		this.destroyed = true;
 		this.opened = undefined;
 		this.loading = undefined;
 		this.loaded = undefined;
@@ -738,6 +892,7 @@ class Book {
 		this.spine && this.spine.destroy();
 		this.locations && this.locations.destroy();
 		this.pageList && this.pageList.destroy();
+		this.storage && this.storage.destroy();
 		this.archive && this.archive.destroy();
 		this.resources && this.resources.destroy();
 		this.container && this.container.destroy();
@@ -748,6 +903,7 @@ class Book {
 		this.spine = undefined;
 		this.locations = undefined;
 		this.pageList = undefined;
+		this.storage = undefined;
 		this.archive = undefined;
 		this.resources = undefined;
 		this.container = undefined;

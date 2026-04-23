@@ -16,6 +16,7 @@ import path from "path-webpack";
  */
 class Resources {
 	constructor(manifest, options) {
+		this.destroyed = false;
 		this.settings = {
 			replacements: (options && options.replacements) || "base64",
 			archive: (options && options.archive),
@@ -31,6 +32,7 @@ class Resources {
 	 * @param {Manifest} manifest
 	 */
 	process(manifest){
+		manifest = manifest || {};
 		this.manifest = manifest;
 		this.resources = Object.keys(manifest).
 			map(function (key){
@@ -55,6 +57,12 @@ class Resources {
 	 * @private
 	 */
 	split(){
+		if (!Array.isArray(this.resources)) {
+			this.html = [];
+			this.assets = [];
+			this.css = [];
+			return;
+		}
 
 		// HTML
 		this.html = this.resources.
@@ -88,6 +96,11 @@ class Resources {
 	 * @private
 	 */
 	splitUrls(){
+		if (!Array.isArray(this.assets) || !Array.isArray(this.css)) {
+			this.urls = [];
+			this.cssUrls = [];
+			return;
+		}
 
 		// All Assets Urls
 		this.urls = this.assets.
@@ -108,14 +121,19 @@ class Resources {
 	 * @return {Promise<string>} Promise resolves with url string
 	 */
 	createUrl (url) {
+		if (this.destroyed || !this.settings) {
+			return Promise.resolve();
+		}
+
 		var parsedUrl = new Url(url);
 		var mimeType = mime.lookup(parsedUrl.filename);
+		var settings = this.settings;
 
-		if (this.settings.archive) {
-			return this.settings.archive.createUrl(url, {"base64": (this.settings.replacements === "base64")});
+		if (settings.archive) {
+			return settings.archive.createUrl(url, {"base64": (settings.replacements === "base64")});
 		} else {
-			if (this.settings.replacements === "base64") {
-				return this.settings.request(url, 'blob')
+			if (settings.replacements === "base64") {
+				return settings.request(url, 'blob')
 					.then((blob) => {
 						return blob2base64(blob);
 					})
@@ -123,7 +141,7 @@ class Resources {
 						return createBase64Url(blob, mimeType);
 					});
 			} else {
-				return this.settings.request(url, 'blob').then((blob) => {
+				return settings.request(url, 'blob').then((blob) => {
 					return createBlobUrl(blob, mimeType);
 				})
 			}
@@ -135,14 +153,23 @@ class Resources {
 	 * @return {Promise}         returns replacement urls
 	 */
 	replacements(){
-		if (this.settings.replacements === "none") {
-			return new Promise(function(resolve) {
-				resolve(this.urls);
-			}.bind(this));
+		if (this.destroyed || !this.settings || !Array.isArray(this.urls)) {
+			return Promise.resolve([]);
 		}
 
-		var replacements = this.urls.map( (url) => {
-				var absolute = this.settings.resolver(url);
+		var settings = this.settings;
+		var urls = this.urls.slice();
+
+		if (settings.replacements === "none") {
+			return Promise.resolve(urls);
+		}
+
+		if (typeof settings.resolver !== "function") {
+			return Promise.resolve([]);
+		}
+
+		var replacements = urls.map( (url) => {
+				var absolute = settings.resolver(url);
 
 				return this.createUrl(absolute).
 					catch((err) => {
@@ -153,8 +180,14 @@ class Resources {
 
 		return Promise.all(replacements)
 			.then( (replacementUrls) => {
-				this.replacementUrls = replacementUrls.filter((url) => {
-					return (typeof(url) === "string");
+				if (this.destroyed || !Array.isArray(this.replacementUrls)) {
+					return replacementUrls;
+				}
+
+				// Keep indexes aligned with this.urls so later substitution can
+				// safely look up the matching replacement by position.
+				this.replacementUrls = replacementUrls.map((url) => {
+					return (typeof(url) === "string") ? url : null;
 				});
 				return replacementUrls;
 			});
@@ -168,12 +201,22 @@ class Resources {
 	 * @return {Promise}
 	 */
 	replaceCss(archive, resolver){
+		if (this.destroyed || !this.settings || !Array.isArray(this.cssUrls) || !Array.isArray(this.urls) || !Array.isArray(this.replacementUrls)) {
+			return Promise.resolve([]);
+		}
+
 		var replaced = [];
 		archive = archive || this.settings.archive;
 		resolver = resolver || this.settings.resolver;
-		this.cssUrls.forEach(function(href) {
+		var cssUrls = this.cssUrls.slice();
+
+		cssUrls.forEach(function(href) {
 			var replacement = this.createCssFile(href, archive, resolver)
 				.then(function (replacementUrl) {
+					if (this.destroyed || !Array.isArray(this.urls) || !Array.isArray(this.replacementUrls)) {
+						return;
+					}
+
 					// switch the url in the replacementUrls
 					var indexInUrls = this.urls.indexOf(href);
 					if (indexInUrls > -1) {
@@ -195,6 +238,9 @@ class Resources {
 	 */
 	createCssFile(href){
 		var newUrl;
+		if (this.destroyed || !this.settings || !Array.isArray(this.urls)) {
+			return Promise.resolve();
+		}
 
 		if (path.isAbsolute(href)) {
 			return new Promise(function(resolve){
@@ -202,20 +248,23 @@ class Resources {
 			});
 		}
 
-		var absolute = this.settings.resolver(href);
+		var settings = this.settings;
+		var assetUrls = this.urls.slice();
+		var absolute = settings.resolver(href);
+		var replacementMode = settings.replacements;
 
 		// Get the text of the css file from the archive
 		var textResponse;
 
-		if (this.settings.archive) {
-			textResponse = this.settings.archive.getText(absolute);
+		if (settings.archive) {
+			textResponse = settings.archive.getText(absolute);
 		} else {
-			textResponse = this.settings.request(absolute, "text");
+			textResponse = settings.request(absolute, "text");
 		}
 
 		// Get asset links relative to css file
-		var relUrls = this.urls.map( (assetHref) => {
-			var resolved = this.settings.resolver(assetHref);
+		var relUrls = assetUrls.map( (assetHref) => {
+			var resolved = settings.resolver(assetHref);
 			var relative = new Path(absolute).relative(resolved);
 
 			return relative;
@@ -229,11 +278,15 @@ class Resources {
 		}
 
 		return textResponse.then( (text) => {
+			if (this.destroyed || !this.settings || !Array.isArray(this.replacementUrls)) {
+				return;
+			}
+
 			// Replacements in the css text
 			text = substitute(text, relUrls, this.replacementUrls);
 
 			// Get the new url
-			if (this.settings.replacements === "base64") {
+			if (replacementMode === "base64") {
 				newUrl = createBase64Url(text, "text/css");
 			} else {
 				newUrl = createBlobUrl(text, "text/css");
@@ -256,6 +309,10 @@ class Resources {
 	 * @return {string[]} array with relative Urls
 	 */
 	relativeTo(absolute, resolver){
+		if (this.destroyed || !this.settings || !Array.isArray(this.urls)) {
+			return [];
+		}
+
 		resolver = resolver || this.settings.resolver;
 
 		// Get Urls relative to current sections
@@ -273,14 +330,26 @@ class Resources {
 	 * @return {string} url
 	 */
 	get(path) {
+		if (this.destroyed) {
+			return Promise.resolve();
+		}
+
+		if (!Array.isArray(this.urls) || !Array.isArray(this.replacementUrls)) {
+			return this.createUrl(path);
+		}
+
 		var indexInUrls = this.urls.indexOf(path);
 		if (indexInUrls === -1) {
 			return;
 		}
 		if (this.replacementUrls.length) {
+			var replacementUrl = this.replacementUrls[indexInUrls];
+			if (typeof replacementUrl !== "string") {
+				return this.createUrl(path);
+			}
 			return new Promise(function(resolve, reject) {
-				resolve(this.replacementUrls[indexInUrls]);
-			}.bind(this));
+				resolve(replacementUrl);
+			});
 		} else {
 			return this.createUrl(path);
 		}
@@ -294,6 +363,10 @@ class Resources {
 	 * @return {string}         content with urls substituted
 	 */
 	substitute(content, url) {
+		if (this.destroyed || !Array.isArray(this.urls) || !Array.isArray(this.replacementUrls)) {
+			return content;
+		}
+
 		var relUrls;
 		if (url) {
 			relUrls = this.relativeTo(url);
@@ -304,16 +377,17 @@ class Resources {
 	}
 
 	destroy() {
+		this.destroyed = true;
 		this.settings = undefined;
 		this.manifest = undefined;
-		this.resources = undefined;
-		this.replacementUrls = undefined;
-		this.html = undefined;
-		this.assets = undefined;
-		this.css = undefined;
+		this.resources = [];
+		this.replacementUrls = [];
+		this.html = [];
+		this.assets = [];
+		this.css = [];
 
-		this.urls = undefined;
-		this.cssUrls = undefined;
+		this.urls = [];
+		this.cssUrls = [];
 	}
 }
 

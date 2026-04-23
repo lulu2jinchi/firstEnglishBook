@@ -126,12 +126,18 @@ export function replaceLinks(contents, fn) {
 }
 
 export function substitute(content, urls, replacements) {
+	if (!content || !Array.isArray(urls) || !Array.isArray(replacements)) {
+		return content;
+	}
+
 	urls.forEach(function(url, i){
-		if (url && replacements[i]) {
+		var replacement = replacements[i];
+
+		if (typeof url === "string" && typeof replacement === "string") {
 			// Account for special characters in the file name.
 			// See https://stackoverflow.com/a/6318729.
 			url = url.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
-			content = content.replace(new RegExp(url, "g"), replacements[i]);
+			content = content.replace(new RegExp(url, "g"), replacement);
 		}
 	});
 	return content;

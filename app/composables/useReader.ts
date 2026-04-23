@@ -597,6 +597,19 @@ const buildBookKey = (path: string) => `book:${hashStringFNV1a(normalizeBookPath
 
 const buildLocationStorageKey = (bookKey: string) => `${locationStoragePrefix}${bookKey}`
 
+const isIOSWeChatWebView = () => {
+  if (typeof navigator === 'undefined') return false
+  const ua = navigator.userAgent || ''
+  const isWeChat = /MicroMessenger/i.test(ua)
+  const isIOSDevice =
+    /iP(hone|od|ad)/i.test(ua) ||
+    (/Macintosh/i.test(ua) &&
+      typeof navigator.maxTouchPoints === 'number' &&
+      navigator.maxTouchPoints > 1)
+
+  return isWeChat && isIOSDevice
+}
+
 const readLocationFromStorage = (bookKey: string) => {
   if (typeof window === 'undefined') return null
   try {
@@ -1384,6 +1397,10 @@ export function useReader(
       height: '100%',
       flow: mode,
       allowScriptedContent: true
+    }
+
+    if (isIOSWeChatWebView()) {
+      renderOptions.method = 'write'
     }
 
     if (mode === 'paginated') {

@@ -1,5 +1,79 @@
 # Bug 修复记录
 
+## 2026-04-23 iOS 微信内打开阅读器首屏白屏
+
+### 现象
+
+- 在 iOS 微信内置浏览器进入阅读器时，页面出现白屏，看不到正文内容。
+- 桌面浏览器打开同一本书可正常显示。
+- 调试时可看到 `epubjs` 连续滚动模式下存在多个 iframe，其中当前应显示的 view 可能被错误隐藏。
+
+### 根因
+
+1. `app/components/ReaderShell.vue` 默认将实验性连续滚动模式开启。
+2. iOS 微信 WebView 下，`epubjs` 的 `continuous` manager 对可见 view 的判断不稳定，可能在初始化阶段把当前章节 iframe 也隐藏。
+3. 结果就是首屏虽然已经创建了 iframe，但可见内容被隐藏，用户看到白屏。
+
+### 解决方案
+
+- `app/components/ReaderShell.vue`
+  - 增加 iOS 微信 WebView 环境识别。
+  - 将实验性连续滚动默认值改为：
+    - 普通环境默认开启；
+    - iOS 微信默认关闭，自动回退到更稳定的 `scrolled-doc`。
+  - 保留查询参数覆盖能力：
+    - `?experimentalContinuous=1` 可强制开启；
+    - `?experimentalContinuous=0` 可强制关闭。
+- `app/composables/useReader.ts`
+  - 在 iOS 微信环境下，强制 `epubjs` 的 iframe 使用 `write` 加载模式，而不是默认优先走 `srcdoc`。
+  - 避免 iOS 微信 WebView 对 `iframe srcdoc` 支持不稳定，导致 DOM 已注入但首屏仍白屏。
+
+### 验证
+
+- iOS 微信进入阅读器时，不再因连续滚动模式导致首屏白屏。
+- 桌面浏览器与非 iOS 微信环境维持原有默认行为。
+- 执行 `npm run build`，编译通过。
+
+## 2026-04-23 iOS 微信浏览器打开书籍时报 `replacements[i]` TypeError
+
+### 现象
+
+- 在 iOS 微信内置浏览器打开书籍详情页时，页面报错并影响书籍打开流程。
+- `vconsole` 中可见错误：
+  - `undefined is not an object (evaluating 'replacements[i]')`
+- 报错栈集中在：
+  - `vendor/epubjs/src/utils/replacements.js`
+  - `vendor/epubjs/src/resources.js`
+
+### 根因
+
+1. `vendor/epubjs/src/resources.js` 在批量生成资源替换地址后，对失败项做了 `filter()`。
+2. 过滤后数组长度变短，导致 `replacementUrls` 的索引与原始资源 `urls` 错位。
+3. 后续 `substitute()` 按原始 `urls` 下标读取 `replacements[i]` 时，部分位置拿到 `undefined`，在 iOS 微信环境中更容易触发。
+
+### 解决方案
+
+- `vendor/epubjs/src/resources.js`
+  - 保留 `replacementUrls` 与原始资源数组的索引对齐，失败项记录为 `null`，不再压缩数组。
+  - `get(path)` 发现对应替换地址缺失时，回退到按需创建 URL，避免继续传播空值。
+  - 为资源替换相关方法增加“已销毁对象”保护；当页面切换或实例销毁后，尚未结束的异步 CSS 替换回调会直接安全退出，不再访问 `this.settings.replacements`。
+  - 为 `replaceCss()` 的异步回调补充 `this.urls / this.replacementUrls` 校验，避免在销毁后继续执行 `this.urls.indexOf(...)`。
+  - 增加 `destroyed` 标记，并在销毁时将内部数组重置为空数组，降低后续异步访问已销毁实例的风险。
+- `vendor/epubjs/src/book.js`
+  - 为打开书籍、加载目录、资源替换、封面获取、离线缓存挂载等异步流程统一增加销毁态保护。
+  - 在异步回调执行前确认当前 `Book` 与 `Resources` 实例仍有效，避免页面快速切换时继续写入已销毁对象。
+  - `destroy()` 同步销毁 `storage`，减少页面退出后离线缓存回调继续触发的风险。
+- `vendor/epubjs/src/utils/replacements.js`
+  - 为 `content / urls / replacements` 增加兜底校验。
+  - 只有当 `url` 和 `replacement` 都是字符串时才执行替换，避免运行时崩溃。
+
+### 验证
+
+- iOS 微信浏览器打开书籍详情页，不再出现 `replacements[i]` 的 TypeError。
+- 资源替换链路在个别资源创建失败时仍可继续执行，不影响主流程。
+- 页面快速切换、资源尚未加载完成、实例已销毁等场景下，不再继续访问 `this.settings / this.urls / this.replacementUrls` 等已失效对象。
+- 执行 `npm run build`，编译通过。
+
 ## 2026-02-25 Normal People 首屏封面在手机端无法下滑进入正文
 
 ### 现象

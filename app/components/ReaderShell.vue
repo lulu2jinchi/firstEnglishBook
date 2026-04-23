@@ -285,8 +285,19 @@ const parseExperimentalContinuousQuery = (value: unknown) => {
   return null;
 };
 
+const isIOSWeChatWebView = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const isWeChat = /MicroMessenger/i.test(ua);
+  const isIOSDevice =
+    /iP(hone|od|ad)/i.test(ua) ||
+    (/Macintosh/i.test(ua) && typeof navigator.maxTouchPoints === "number" && navigator.maxTouchPoints > 1);
+
+  return isWeChat && isIOSDevice;
+};
+
 const experimentalContinuousScroll = ref(
-  parseExperimentalContinuousQuery(route.query.experimentalContinuous) ?? true
+  parseExperimentalContinuousQuery(route.query.experimentalContinuous) ?? !isIOSWeChatWebView()
 );
 
 const syncExperimentalContinuousFromRoute = () => {
